@@ -30,6 +30,9 @@ final class LyricsViewModel: ObservableObject {
     private var lastParaIndex: Int = -1
 
     static let tickInterval = 0.1
+    /// How far past a highlighted paragraph's end we tolerate before
+    /// concluding the panel is no longer rendering (e.g. minimized).
+    static let staleHighlightSlack = 1.5
 
     /// Playback position for subtitle lookup.
     ///
@@ -81,7 +84,19 @@ final class LyricsViewModel: ObservableObject {
             // window (guards against rate hiccups and stale anchors).
             let para = transcript.paragraphs[lastParaIndex]
             if t < para.begin { t = para.begin }
-            if t > para.end { t = para.end }
+            if t > para.end {
+                if t > para.end + Self.staleHighlightSlack {
+                    // A live panel advances within a fraction of a second of
+                    // a paragraph ending. If we're well past the end and the
+                    // highlight still hasn't moved, the panel has stopped
+                    // rendering (window minimized/hidden). Stop following it
+                    // and free-run on extrapolation; the next highlight
+                    // change re-locks us.
+                    lastParaIndex = -1
+                } else {
+                    t = para.end
+                }
+            }
         }
         return t
     }

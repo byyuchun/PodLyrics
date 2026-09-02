@@ -38,6 +38,17 @@ final class LyricsViewModel: ObservableObject {
     /// Consecutive failed searches since the last lock; widens the search.
     private var searchMisses = 0
 
+    /// File-time → transcript-time mapping (downloaded files carry inserted
+    /// ads; the TTML is timed against the clean programme). nil = identity.
+    private var timelineMap: TimelineMap?
+    private var timelineMapKey: String?
+    private var buildingTimelineMap = false
+    /// One-line sync diagnostic shown in the overlay.
+    @Published var monitor: String = ""
+    @Published var showMonitor: Bool = UserDefaults.standard.bool(forKey: "showMonitor") {
+        didSet { UserDefaults.standard.set(showMonitor, forKey: "showMonitor") }
+    }
+
     static let tickInterval = 0.1
     static let debug = ProcessInfo.processInfo.environment["PODLYRICS_DEBUG"] != nil
     /// How far past a highlighted paragraph's end we tolerate before
@@ -91,7 +102,9 @@ final class LyricsViewModel: ObservableObject {
                 // still the best estimate the panel gives us.
                 if idx != lastParaIndex {
                     lastParaIndex = idx
-                    anchorSeconds = transcript.paragraphs[idx].begin + Self.tickInterval / 2 * playbackRate
+                    // Anchors live in file time; the paragraph is transcript time.
+                    let paraBegin = transcript.paragraphs[idx].begin + Self.tickInterval / 2 * playbackRate
+                    anchorSeconds = timelineMap?.fileTime(forTranscript: paraBegin) ?? paraBegin
                     anchorDate = Date()
                     t = anchorSeconds
                 }
@@ -106,9 +119,11 @@ final class LyricsViewModel: ObservableObject {
             // Same paragraph still highlighted: keep extrapolation inside its
             // window (guards against rate hiccups and stale anchors).
             let para = transcript.paragraphs[lastParaIndex]
-            if t < para.begin { t = para.begin }
-            if t > para.end {
-                if t > para.end + Self.staleHighlightSlack {
+            let begin = timelineMap?.fileTime(forTranscript: para.begin) ?? para.begin
+            let end = timelineMap?.fileTime(forTranscript: para.end) ?? para.end
+            if t < begin { t = begin }
+            if t > end {
+                if t > end + Self.staleHighlightSlack {
                     // A live panel advances within a fraction of a second of
                     // a paragraph ending. If we're well past the end and the
                     // highlight still hasn't moved, the panel has stopped
@@ -117,7 +132,7 @@ final class LyricsViewModel: ObservableObject {
                     // change re-locks us.
                     lastParaIndex = -1
                 } else {
-                    t = para.end
+                    t = end
                 }
             }
         }
@@ -186,6 +201,7 @@ final class LyricsViewModel: ObservableObject {
             if trID != loadedTranscriptID {
                 loadTranscript(id: trID)
             }
+            if let audio = snap.localAudioURL { ensureTimelineMap(transcriptID: trID, audioURL: audio) }
         } else {
             transcript = nil
             loadedTranscriptID = nil
@@ -253,6 +269,30 @@ final class LyricsViewModel: ObservableObject {
         }
     }
 
+    private func ensureTimelineMap(transcriptID: String, audioURL: URL) {
+        let key = transcriptID + "|" + audioURL.path
+        guard key != timelineMapKey, !buildingTimelineMap else { return }
+        guard let sigURL = TimelineMapBuilder.signatureURL(transcriptID: transcriptID) else {
+            timelineMapKey = key
+            timelineMap = nil
+            return
+        }
+        buildingTimelineMap = true
+        Task.detached(priority: .userInitiated) {
+            let started = Date()
+            let map = try? TimelineMapBuilder.build(audioURL: audioURL, signatureURL: sigURL)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.buildingTimelineMap = false
+                self.timelineMapKey = key
+                self.timelineMap = map
+                if Self.debug {
+                    NSLog(String(format: "timeline map: %d segments in %.1f s", map?.segments.count ?? -1, Date().timeIntervalSince(started)))
+                }
+            }
+        }
+    }
+
     private func loadTranscript(id: String) {
         if let url = TranscriptStore.locate(transcriptID: id),
            let t = TranscriptStore.load(url: url), !t.lines.isEmpty {
@@ -271,7 +311,23 @@ final class LyricsViewModel: ObservableObject {
     private func tick() {
         guard let snap = snapshot, let transcript else { return }
         alignIfDue()
-        let t = playbackTime(for: snap)
+        let fileTime = playbackTime(for: snap)
+        let mapped: Double? = timelineMap.map { $0.transcriptTime(forFile: fileTime) } ?? fileTime
+        updateMonitor(fileTime: fileTime, transcriptTime: mapped)
+        guard let t = mapped else {
+            // Inside an ad: nothing to show but where the programme resumes.
+            if currentIndex != -2 {
+                currentIndex = -2
+                previousLine = ""
+                currentWords = []
+                spokenWordCount = 0
+                let resume = timelineMap?.nextSegmentStart(after: fileTime)
+                    .flatMap { timelineMap?.transcriptTime(forFile: $0) }
+                    .flatMap { transcript.index(at: $0 + 0.05) }
+                nextLine = resume.map { transcript.lines[$0].text } ?? ""
+            }
+            return
+        }
         guard let idx = transcript.index(at: t) else {
             previousLine = ""
             currentWords = []
@@ -289,5 +345,33 @@ final class LyricsViewModel: ObservableObject {
         }
         let spoken = line.words.lastIndex(where: { $0.begin <= t }).map { $0 + 1 } ?? 0
         if spoken != spokenWordCount { spokenWordCount = spoken }
+    }
+
+    private var lastMonitorUpdate: Date = .distantPast
+
+    /// Compact diagnostic line: sync source, file position, transcript
+    /// position, and the mapping in effect.
+    private func updateMonitor(fileTime: Double, transcriptTime: Double?) {
+        guard Date().timeIntervalSince(lastMonitorUpdate) > 0.25 else { return }
+        lastMonitorUpdate = Date()
+        let source: String
+        if audioLocked { source = "音频锁定" }
+        else if lastParaIndex >= 0 { source = "字幕面板" }
+        else if aligner != nil { source = "搜索中 ±\(searchMisses < 3 ? "6" : "…")s" }
+        else { source = "MediaRemote 外推" }
+        func mmss(_ s: Double) -> String { String(format: "%d:%05.2f", Int(s) / 60, s - Double(Int(s) / 60 * 60)) }
+        var parts = [source, "文件 \(mmss(fileTime))"]
+        if let timelineMap {
+            if let transcriptTime {
+                parts.append("字幕 \(mmss(transcriptTime)) (\(String(format: "%+.1f", transcriptTime - fileTime))s)")
+            } else {
+                parts.append("广告中")
+            }
+            parts.append("\(timelineMap.segments.count) 段")
+        } else if buildingTimelineMap {
+            parts.append("正在校准时间轴…")
+        }
+        let text = parts.joined(separator: " · ")
+        if text != monitor { monitor = text }
     }
 }

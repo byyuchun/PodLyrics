@@ -43,6 +43,12 @@ struct LyricsView: View {
                     .foregroundStyle(.white.opacity(0.45))
                     .lineLimit(1)
                     .id("next-\(model.currentIndex)")
+                if model.showMonitor {
+                    Text(model.monitor)
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .lineLimit(1)
+                }
             } else {
                 Text(model.episodeTitle.isEmpty ? "PodLyrics" : model.episodeTitle)
                     .font(.system(size: 15, weight: .medium))
@@ -62,6 +68,7 @@ struct LyricsView: View {
         )
         .animation(.spring(duration: 0.35), value: model.currentIndex)
         .contextMenu {
+            Toggle("显示同步监控", isOn: $model.showMonitor)
             Button("隐藏（菜单栏图标可再显示）") {
                 NSApp.windows.first { $0 is NSPanel }?.orderOut(nil)
             }

@@ -5,6 +5,9 @@ struct NowPlayingSnapshot {
     let title: String
     /// Path fragment like "PodcastContent211/v4/.../transcript_xxx.ttml"
     let transcriptID: String?
+    /// Downloaded episode audio on disk (Podcasts' `podEpStrURL`), when the
+    /// episode is playing from the local cache rather than streaming.
+    let localAudioURL: URL?
     let elapsed: Double
     let rate: Double
     let duration: Double
@@ -49,6 +52,7 @@ final class MediaRemoteHelper {
                 }
                 if let ui = info["kMRMediaRemoteNowPlayingInfoUserInfo"] as? [String: Any] {
                     out["transcriptID"] = ui["podEpTrId"] as? String ?? ""
+                    out["streamURL"] = ui["podEpStrURL"] as? String ?? ""
                 }
             }
             if let data = try? JSONSerialization.data(withJSONObject: out),
@@ -109,9 +113,13 @@ final class MediaRemoteHelper {
             return
         }
         let trID = obj["transcriptID"] as? String
+        let localAudio = (obj["streamURL"] as? String)
+            .flatMap(URL.init(string:))
+            .flatMap { $0.isFileURL ? $0 : nil }
         onUpdate(NowPlayingSnapshot(
             title: title,
             transcriptID: (trID?.isEmpty ?? true) ? nil : trID,
+            localAudioURL: localAudio,
             elapsed: obj["elapsed"] as? Double ?? 0,
             rate: obj["rate"] as? Double ?? 0,
             duration: obj["duration"] as? Double ?? 0,

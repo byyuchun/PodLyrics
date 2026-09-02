@@ -16,45 +16,43 @@ final class LyricsViewModel: ObservableObject {
 
     private var helper: MediaRemoteHelper?
     private let axReader = AXHighlightReader()
+    private let waveform = WaveformSync()
     private var snapshot: NowPlayingSnapshot?
     private var transcript: Transcript?
     private var loadedTranscriptID: String?
     private var tickTimer: Timer?
 
-    /// Anchor for extrapolating the playback position: `anchorSeconds` was the
-    /// true position at wall-clock `anchorDate`.
-    private var anchorSeconds: Double = 0
-    private var anchorDate: Date = .distantPast
     private var playbackRate: Double = 0
     private var lastHighlightText: String?
     private var lastParaIndex: Int = -1
+    /// Small correction on top of MediaRemote's playhead, not a clock of its own.
+    private var waveformOffset: Double = 0
+    /// When the panel jumps and MediaRemote is still stale, follow the panel
+    /// until the playhead catches up.
+    private var panelSeek: (seconds: Double, date: Date)?
 
     static let tickInterval = 0.1
-    /// How far past a highlighted paragraph's end we tolerate before
-    /// concluding the panel is no longer rendering (e.g. minimized).
     static let staleHighlightSlack = 1.5
 
     /// Playback position for subtitle lookup.
     ///
-    /// Primary sync source is the official transcript panel itself: the
-    /// paragraph it highlights is exposed via Accessibility, and we can map
-    /// that paragraph back to its TTML time window. This makes the float
-    /// window agree with the panel by construction.
+    /// The playhead (MediaRemote elapsed) is the timeline. Waveform Offset is
+    /// only a short correction around that playhead. A seek therefore moves
+    /// subtitles immediately; the next audio snippet re-fits the offset.
     ///
-    /// Precision within a paragraph: the moment the panel moves to a NEW
-    /// paragraph is a precise sync event — playback just crossed that
-    /// paragraph's begin time (detection is at most one poll interval late,
-    /// so add half an interval on average). Re-anchor there uncondition-
-    /// ally, then advance at the playback rate for word-level highlighting.
-    /// Additionally, clamp the extrapolation into the highlighted
-    /// paragraph's window so drift can never leak across a boundary.
-    ///
-    /// When the panel is closed (no highlight readable), fall back to pure
-    /// MediaRemote anchor + rate extrapolation.
+    /// If the official panel jumps to a paragraph the playhead does not yet
+    /// know about, follow the Panel Highlight until MediaRemote catches up.
     private func playbackTime(for snap: NowPlayingSnapshot) -> Double {
-        var t = playbackRate > 0
-            ? anchorSeconds + Date().timeIntervalSince(anchorDate) * playbackRate
-            : anchorSeconds
+        var t = snap.extrapolatedTime + waveformOffset
+
+        if let seek = panelSeek {
+            let panelT = seek.seconds + Date().timeIntervalSince(seek.date) * playbackRate
+            if abs(snap.extrapolatedTime - panelT) < 1.2 {
+                panelSeek = nil
+            } else {
+                t = panelT
+            }
+        }
 
         guard let transcript,
               let highlighted = axReader.readHighlightedParagraph()
@@ -63,35 +61,26 @@ final class LyricsViewModel: ObservableObject {
         if highlighted != lastHighlightText {
             lastHighlightText = highlighted
             if let idx = transcript.paragraphIndex(matching: highlighted) {
-                // Sequential advance to the next paragraph: playback is right
-                // at its beginning. Jumps (seek/rewind) as well: begin is
-                // still the best estimate the panel gives us.
+                let para = transcript.paragraphs[idx]
                 if idx != lastParaIndex {
                     lastParaIndex = idx
-                    anchorSeconds = transcript.paragraphs[idx].begin + Self.tickInterval / 2 * playbackRate
-                    anchorDate = Date()
-                    t = anchorSeconds
+                    // Playhead still on the old spot: this is a seek the
+                    // official panel already knows about. Jump now.
+                    if t < para.begin - 0.4 || t > para.end + 1.5 {
+                        t = para.begin + Self.tickInterval / 2 * playbackRate
+                        panelSeek = (t, Date())
+                        waveformOffset = 0
+                        waveform.invalidateLock()
+                    }
                 }
             } else {
-                // Panel moved to a paragraph we can't match in the TTML.
-                // The previous paragraph's window is stale; if we kept it,
-                // the clamp below would freeze subtitles at its end until
-                // the next successful match. Drop it and free-run instead.
                 lastParaIndex = -1
             }
         } else if lastParaIndex >= 0, lastParaIndex < transcript.paragraphs.count, playbackRate > 0 {
-            // Same paragraph still highlighted: keep extrapolation inside its
-            // window (guards against rate hiccups and stale anchors).
             let para = transcript.paragraphs[lastParaIndex]
             if t < para.begin { t = para.begin }
             if t > para.end {
                 if t > para.end + Self.staleHighlightSlack {
-                    // A live panel advances within a fraction of a second of
-                    // a paragraph ending. If we're well past the end and the
-                    // highlight still hasn't moved, the panel has stopped
-                    // rendering (window minimized/hidden). Stop following it
-                    // and free-run on extrapolation; the next highlight
-                    // change re-locks us.
                     lastParaIndex = -1
                 } else {
                     t = para.end
@@ -112,6 +101,12 @@ final class LyricsViewModel: ObservableObject {
         } catch {
             status = "无法启动播放信息助手：\(error.localizedDescription)"
         }
+        waveform.onOffset = { [weak self] offset in
+            Task { @MainActor in
+                self?.waveformOffset = offset
+            }
+        }
+        waveform.start()
         tickTimer = Timer.scheduledTimer(withTimeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -119,24 +114,32 @@ final class LyricsViewModel: ObservableObject {
 
     func stop() {
         helper?.stop()
+        waveform.stop()
         tickTimer?.invalidate()
     }
 
     private func apply(_ snap: NowPlayingSnapshot?) {
+        let prev = snapshot
         snapshot = snap
         guard let snap else {
             status = "没有正在播放的内容"
             hasTranscript = false
+            waveformOffset = 0
+            panelSeek = nil
+            waveform.reset()
             return
         }
         episodeTitle = snap.title
         playbackRate = snap.rate
-        // Re-anchor whenever MediaRemote stamps a fresher position
-        // (play/pause/seek), or on first sight of this episode.
-        if snap.timestamp > anchorDate {
-            anchorSeconds = snap.elapsed
-            anchorDate = snap.timestamp
+        if let prev, snap.timestamp > prev.timestamp {
+            let predicted = prev.elapsed + snap.timestamp.timeIntervalSince(prev.timestamp) * prev.rate
+            if abs(snap.elapsed - predicted) > 1.5 {
+                waveformOffset = 0
+                panelSeek = nil
+                waveform.invalidateLock()
+            }
         }
+        waveform.update(snap)
         if let trID = snap.transcriptID {
             if trID != loadedTranscriptID {
                 loadTranscript(id: trID)

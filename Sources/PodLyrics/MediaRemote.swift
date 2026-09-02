@@ -10,6 +10,10 @@ struct NowPlayingSnapshot {
     let duration: Double
     /// Wall-clock moment at which `elapsed` was accurate.
     let timestamp: Date
+    /// Apple Podcasts store track id; used to find a Local Episode Asset.
+    let storeTrackID: Int64?
+    /// Remote enclosure, used only when Podcasts has not already downloaded the episode.
+    let enclosureURL: String?
 
     /// Extrapolated playback position right now (fallback when the
     /// authoritative AX slider position is unavailable).
@@ -47,8 +51,14 @@ final class MediaRemoteHelper {
                 if let ts = info["kMRMediaRemoteNowPlayingInfoTimestamp"] as? Date {
                     out["timestamp"] = ts.timeIntervalSince1970
                 }
+                let store = info["kMRMediaRemoteNowPlayingInfoiTunesStoreIdentifier"] as? NSNumber
+                    ?? info["kMRMediaRemoteNowPlayingInfoUniqueIdentifier"] as? NSNumber
+                if let store {
+                    out["storeTrackID"] = store.int64Value
+                }
                 if let ui = info["kMRMediaRemoteNowPlayingInfoUserInfo"] as? [String: Any] {
                     out["transcriptID"] = ui["podEpTrId"] as? String ?? ""
+                    out["enclosureURL"] = ui["podEpStrURL"] as? String ?? ""
                 }
             }
             if let data = try? JSONSerialization.data(withJSONObject: out),
@@ -58,7 +68,7 @@ final class MediaRemoteHelper {
             }
         }
     }
-    Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in emit() }
+    Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { _ in emit() }
     emit()
     RunLoop.main.run()
     """#
@@ -109,13 +119,24 @@ final class MediaRemoteHelper {
             return
         }
         let trID = obj["transcriptID"] as? String
+        let enc = obj["enclosureURL"] as? String
         onUpdate(NowPlayingSnapshot(
             title: title,
             transcriptID: (trID?.isEmpty ?? true) ? nil : trID,
             elapsed: obj["elapsed"] as? Double ?? 0,
             rate: obj["rate"] as? Double ?? 0,
             duration: obj["duration"] as? Double ?? 0,
-            timestamp: Date(timeIntervalSince1970: obj["timestamp"] as? Double ?? Date().timeIntervalSince1970)
+            timestamp: Date(timeIntervalSince1970: obj["timestamp"] as? Double ?? Date().timeIntervalSince1970),
+            storeTrackID: int64(obj["storeTrackID"]),
+            enclosureURL: (enc?.isEmpty ?? true) ? nil : enc
         ))
+    }
+
+    private func int64(_ value: Any?) -> Int64? {
+        if let n = value as? Int64 { return n }
+        if let n = value as? Int { return Int64(n) }
+        if let n = value as? NSNumber { return n.int64Value }
+        if let s = value as? String { return Int64(s) }
+        return nil
     }
 }

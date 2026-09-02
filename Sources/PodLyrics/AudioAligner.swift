@@ -206,8 +206,10 @@ final class ReferenceAudio {
     /// actual start used.
     func read(from start: Double, seconds: Double) -> (samples: [Float], start: Double)? {
         let sr = file.processingFormat.sampleRate
-        let begin = max(0, min(start, duration))
-        let frames = AVAudioFrameCount(min(seconds, duration - begin) * sr)
+        // `start`/`seconds` may be infinite for a whole-file search.
+        let begin = start.isFinite ? max(0, min(start, duration)) : 0
+        let length = seconds.isFinite ? min(seconds, duration - begin) : duration - begin
+        let frames = AVAudioFrameCount(max(0, length) * sr)
         guard frames > 0,
               let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames) else { return nil }
         file.framePosition = AVAudioFramePosition(begin * sr)

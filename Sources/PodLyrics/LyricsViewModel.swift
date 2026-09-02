@@ -35,6 +35,8 @@ final class LyricsViewModel: ObservableObject {
     private var alignerURL: URL?
     private var lastAudioLock: Date = .distantPast
     private var lastAlignAttempt: Date = .distantPast
+    /// Consecutive failed searches since the last lock; widens the search.
+    private var searchMisses = 0
 
     static let tickInterval = 0.1
     static let debug = ProcessInfo.processInfo.environment["PODLYRICS_DEBUG"] != nil
@@ -155,20 +157,29 @@ final class LyricsViewModel: ObservableObject {
         let rateChanged = snap.rate != playbackRate
         let previousRate = playbackRate
         playbackRate = snap.rate
-        // Re-anchor whenever MediaRemote stamps a fresher position
-        // (play/pause/seek), or on first sight of this episode.
-        if snap.timestamp > anchorDate {
-            // MediaRemote also re-stamps occasionally mid-playback. If the
-            // audio lock already predicts that position, keep the lock (it's
-            // far more precise); a real discontinuity or rate change means the
-            // captured buffer straddles two stream states, so drop it.
-            let predicted = anchorSeconds + snap.timestamp.timeIntervalSince(anchorDate) * previousRate
-            let consistent = !rateChanged && abs(predicted - snap.elapsed) < 0.4
-            if !(audioLocked && consistent) {
-                lastAudioLock = .distantPast
-                anchorSeconds = snap.elapsed
-                anchorDate = snap.timestamp
-            }
+        // Compare positions, not timestamps: during a burst of skips
+        // MediaRemote's updates arrive with non-monotonic timestamps, so a
+        // "fresher stamp" rule can latch onto an intermediate position and
+        // never recover. If MediaRemote's view of *now* disagrees with ours
+        // (or the rate changed), a seek happened: drop the audio lock (the
+        // captured buffer straddles two stream states) and re-anchor.
+        let now = Date()
+        let mediaRemoteNow = snap.elapsed + max(0, now.timeIntervalSince(snap.timestamp)) * snap.rate
+        let ourNow = anchorSeconds + now.timeIntervalSince(anchorDate) * previousRate
+        let disagreement = abs(mediaRemoteNow - ourNow)
+        // MediaRemote itself runs a couple hundred ms off the real output, so
+        // keep a lock unless the gap is clearly a jump.
+        let jumped = rateChanged || disagreement > (audioLocked ? 0.6 : 1.0)
+        if jumped {
+            lastAudioLock = .distantPast
+            lastParaIndex = -1
+            searchMisses = 0
+            anchorSeconds = snap.elapsed
+            anchorDate = snap.timestamp
+        } else if !audioLocked, lastParaIndex < 0, snap.timestamp > anchorDate {
+            // Free-running on MediaRemote alone: follow its fresher stamps.
+            anchorSeconds = snap.elapsed
+            anchorDate = snap.timestamp
         }
         configureAligner(for: snap.localAudioURL)
         if let trID = snap.transcriptID {
@@ -206,14 +217,26 @@ final class LyricsViewModel: ObservableObject {
         guard Date().timeIntervalSince(lastAlignAttempt) >= interval else { return }
         lastAlignAttempt = Date()
         let hint = anchorSeconds + Date().timeIntervalSince(anchorDate) * playbackRate
-        // Once locked the truth is within a fraction of a second; while
-        // searching, MediaRemote's own position can be a few seconds off.
-        let halfWidth = audioLocked ? 1.5 : 6.0
+        // Once locked the truth is within a fraction of a second. While
+        // searching, start near MediaRemote's position, then widen on every
+        // miss: after a burst of skips MediaRemote's report can be stale by
+        // minutes, and a whole-episode search costs only about a second.
+        let halfWidth: Double
+        if audioLocked {
+            halfWidth = 1.5
+        } else {
+            let ladder: [Double] = [6, 6, 6, 20, 60, 200, .infinity]
+            halfWidth = ladder[min(searchMisses, ladder.count - 1)]
+        }
         let rate = playbackRate
         aligner.align(hint: hint, rate: rate, halfWidth: halfWidth, locked: audioLocked) { [weak self] lock in
             guard let self else { return }
-            if Self.debug, lock == nil { NSLog(String(format: "align: no match near %.2f (±%.1f)", hint, halfWidth)) }
+            if lock == nil {
+                if !self.audioLocked { self.searchMisses += 1 }
+                if Self.debug { NSLog(String(format: "align: no match near %.2f (±%.1f)", hint, halfWidth)) }
+            }
             guard let lock, self.playbackRate == rate else { return }
+            self.searchMisses = 0
             // A seek/rate change re-anchors on MediaRemote's timestamp; audio
             // captured before that describes the old stream state.
             guard lock.date >= self.anchorDate else { return }

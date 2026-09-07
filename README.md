@@ -28,9 +28,12 @@ Unlike the built-in transcript panel, it stays visible over whatever you are doi
 ```bash
 git clone https://github.com/byyuchun/PodLyrics.git
 cd PodLyrics
-swift build -c release
-.build/release/PodLyrics &
+./make-app.sh --install   # builds PodLyrics.app and copies it to /Applications
 ```
+
+Then launch **PodLyrics** from Launchpad / Spotlight like any other app (it lives in the menu bar, no Dock icon). To auto-start at login: System Settings → General → Login Items → **+** → PodLyrics.
+
+If you prefer running the bare binary: `swift build -c release && .build/release/PodLyrics &`.
 
 Then, in Apple Podcasts:
 
@@ -41,7 +44,7 @@ Then, in Apple Podcasts:
 Two macOS permissions may be requested on first run:
 
 - **System Audio Recording** — PodLyrics listens to Podcasts' own audio output (only that process; never the microphone, never other apps). Allow it under System Settings → Privacy & Security → Screen & System Audio Recording.
-- **Accessibility** — only needed for the fallback sync method used with streaming (non-downloaded) episodes. System Settings → Privacy & Security → Accessibility → **+** → press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> and enter the full path to `.build/release/PodLyrics` (`.build` is hidden).
+- **Accessibility** — only needed for the fallback sync method used with streaming (non-downloaded) episodes. System Settings → Privacy & Security → Accessibility → **+** → pick `/Applications/PodLyrics.app` (or, for the bare binary, press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> and enter the full path to `.build/release/PodLyrics`; `.build` is hidden).
 
 ## Requirements
 
@@ -57,7 +60,7 @@ Two macOS permissions may be requested on first run:
 | Hide / show | Menu-bar captions icon → “显示/隐藏字幕”, or right-click the window → hide |
 | Show the sync monitor | Right-click the window → “显示同步监控” |
 | Quit | Right-click the window → quit, or menu-bar icon → 退出 |
-| Start | `.build/release/PodLyrics &` |
+| Start | Open **PodLyrics** from Launchpad / Spotlight (or `.build/release/PodLyrics &`) |
 | Stop from a terminal | `pkill -x PodLyrics` |
 
 ### The sync monitor
@@ -140,9 +143,12 @@ macOS 悬浮字幕工具：实时显示 Apple Podcasts 正在播放剧集的官�
 ```bash
 git clone https://github.com/byyuchun/PodLyrics.git
 cd PodLyrics
-swift build -c release
-.build/release/PodLyrics &
+./make-app.sh --install   # 编译并生成 PodLyrics.app，拷贝到 /Applications
 ```
+
+之后像普通 App 一样从启动台 / Spotlight 打开 **PodLyrics** 即可（它常驻菜单栏，没有 Dock 图标）。想开机自启：系统设置 → 通用 → 登录项 → **+** → PodLyrics。
+
+如果只想跑裸二进制：`swift build -c release && .build/release/PodLyrics &`。
 
 然后在 Apple Podcasts 里：
 
@@ -153,7 +159,7 @@ swift build -c release
 首次运行 macOS 可能弹出两个权限请求：
 
 - **系统音频录制** —— PodLyrics 只监听 Podcasts 自己的音频输出（仅这个进程；不开麦克风、不采其他应用）。在 系统设置 → 隐私与安全性 → 屏幕与系统音频录制 里允许。
-- **辅助功能** —— 仅在线流播（未下载）剧集的回退同步需要。系统设置 → 隐私与安全性 → 辅助功能 → **+** → 按 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> 输入 `.build/release/PodLyrics` 的完整路径（`.build` 是隐藏目录）。
+- **辅助功能** —— 仅在线流播（未下载）剧集的回退同步需要。系统设置 → 隐私与安全性 → 辅助功能 → **+** → 选择 `/Applications/PodLyrics.app`（裸二进制则按 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> 输入 `.build/release/PodLyrics` 的完整路径，`.build` 是隐藏目录）。
 
 ## 环境要求
 
@@ -169,7 +175,7 @@ swift build -c release
 | 隐藏 / 显示 | 菜单栏字幕气泡图标 →「显示/隐藏字幕」，或右键悬浮窗 → 隐藏 |
 | 显示同步监控 | 右键悬浮窗 →「显示同步监控」 |
 | 退出 | 右键悬浮窗 → 退出，或菜单栏图标 → 退出 |
-| 启动 | `.build/release/PodLyrics &` |
+| 启动 | 启动台 / Spotlight 打开 **PodLyrics**（或 `.build/release/PodLyrics &`） |
 | 命令行停止 | `pkill -x PodLyrics` |
 
 ### 同步监控

@@ -12,11 +12,11 @@
 
 - 半透明置顶悬浮窗，可拖动，盖在其他应用和全屏 Space 上；无 Dock 图标，由菜单栏控制
 - 上一句 / 当前句 / 下一句，说到哪个词就亮哪个词
-- 已下载剧集：用 Podcasts 进程的真实音频对齐字幕，并处理动态插入的广告（广告期间显示「广告中」，结束后继续对得上）
+- 已下载剧集：用 Podcasts 进程的真实音频对齐字幕，并处理动态插入的广告（广告时段当前行留空，「下一句」预告节目恢复处）
 - 跟随暂停、拖进度条、跳过、章节跳转和倍速（Podcasts 支持的 0.8×–2×）
 - 在线流播（未下载）时退回官方字幕面板同步，精度较低
 - 可选一行同步监控，显示当前同步源和偏移
-- **词汇标注**（默认开启，水平为「四级」）：高于你水平的词显示为 `word(释义)`；每集有词表和全文；生词本带本机例句；可接入自己的 OpenAI 兼容接口做语境释义
+- **词汇标注**（默认按「四级」）：高于你水平的词显示为 `word(释义)`；每集有词表和全文；生词本带本机例句；可接入自己的 OpenAI 兼容接口做语境释义
 
 ## 环境要求
 
@@ -45,12 +45,12 @@ swift build -c release && .build/release/PodLyrics &
 ## 第一次使用
 
 1. 打开 PodLyrics。屏幕底部中央出现半透明悬浮窗（还没在播时显示「等待播放…」），菜单栏出现气泡图标。
-2. 按系统提示授权（启动时就会问）：
-   - **屏幕与系统音频录制** — 只监听 Podcasts 这一个进程的输出，不录麦克风、不采其他应用。系统设置 → 隐私与安全性 → 屏幕与系统音频录制。
-   - **辅助功能** — 启动时就会请求；真正用到是在线流播（未下载）时，用来读官方字幕面板正在高亮的段落。系统设置 → 隐私与安全性 → 辅助功能 → **+** → 选 `/Applications/PodLyrics.app`。若跑的是裸二进制，按 <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> 输入 `.build/release/PodLyrics` 的完整路径（`.build` 是隐藏目录）。
+2. 按系统提示授权：
+   - **辅助功能** — 启动时就会请求。音频锁还没握住时（在线流播，或已下载但仍在搜索），用来读官方字幕面板正在高亮的段落。系统设置 → 隐私与安全性 → 辅助功能 → **+** → 选 `/Applications/PodLyrics.app`。若跑的是裸二进制，按 <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> 输入 `.build/release/PodLyrics` 的完整路径（`.build` 是隐藏目录）。
+   - **屏幕与系统音频录制** — 第一次对已下载剧集做音频对齐时会问。只监听 Podcasts 这一个进程的输出，不录麦克风、不采其他应用。系统设置 → 隐私与安全性 → 屏幕与系统音频录制。
 3. 在 Apple Podcasts 里：
    1. **下载**这一集（剧集旁的下载箭头）。已下载走音频对齐；只在线播放则走字幕面板回退。
-   2. **播放**，并点一次播放器上的**字幕（气泡）按钮**，让 Podcasts 把 TTML 缓存到本机。之后面板可以关掉（在线流播回退时需要保持面板打开，见下方限制）。
+   2. **播放**，并点一次播放器上的**字幕（气泡）按钮**，让 Podcasts 把 TTML 缓存到本机。音频锁定之后可以关掉面板；走字幕面板回退时需要保持打开（见下方限制）。
 4. 悬浮窗在检测到播放后开始跟读。右键悬浮窗 → **我的水平**，把档位调成你的水平（默认 **四级**）。该档及以下的词不标，只标更难的词。
 
 第一次访问 Podcasts 的缓存目录时，系统也可能再弹一次文件夹权限，允许即可。
@@ -127,20 +127,26 @@ swift build -c release && .build/release/PodLyrics &
 | 悬浮窗拖到屏幕外、抓不到 | 菜单栏 →「重置字幕位置」 |
 | 认识的词被标了 / 不认识的没标 | 在剧集词表里标为已掌握或收入生词本；档位只是默认值 |
 | 想看详细日志 | `PODLYRICS_DEBUG=1 .build/release/PodLyrics`，锁定、拒绝和时间轴分段会打到 stderr |
-| 不播放也想看某一行 | `PODLYRICS_PREVIEW="<transcriptID>\|<秒数>" .build/release/PodLyrics` |
+| 不播放也想看某一行 | 见下方 `PODLYRICS_PREVIEW` |
 
 ## 开发说明
 
-`make-app.sh` 会做一次 ad-hoc 签名；辅助功能权限绑在签名上，每次重编都会被当成新 App，系统会再问一次。要权限在重建后仍然有效，在登录钥匙串里放一张名为 `PodLyrics Dev` 的代码签名证书（自签即可），或设置 `PODLYRICS_SIGN_IDENTITY`。
+`make-app.sh` 默认做 ad-hoc 签名；若登录钥匙串里有名为 `PodLyrics Dev` 的代码签名证书（或设置了 `PODLYRICS_SIGN_IDENTITY`）则用它。辅助功能权限绑在签名上，ad-hoc 每次重编都会被当成新 App，系统会再问一次。稳定签名可以让权限在重建后仍然有效（自签证书即可）。
 
 其它环境变量：
 
 | 变量 | 用途 |
 | --- | --- |
 | `PODLYRICS_DEBUG=1` | 对齐与时间轴的调试日志（stderr） |
-| `PODLYRICS_PREVIEW=<transcriptID>\|<seconds>` | 不播放，直接把某份已缓存字幕的某一行显示在悬浮窗 |
+| `PODLYRICS_PREVIEW` | 不播放，直接显示某份已缓存字幕的某一行。值为 transcriptID 和秒数，中间用一条竖线分隔 |
 | `PODLYRICS_API_KEY` | 语境释义用的 Key，跳过钥匙串（方便调试） |
 | `PODLYRICS_SIGN_IDENTITY` | `make-app.sh` 使用的签名身份，默认 `PodLyrics Dev` |
+
+预览某一行（竖线分隔 transcriptID 和秒数）：
+
+```bash
+PODLYRICS_PREVIEW="<transcriptID>|<seconds>" .build/release/PodLyrics
+```
 
 词典 `Sources/PodLyrics/Resources/lexicon.sqlite` 由 `tools/build-lexicon.py` 从 ECDICT 1.0.28 生成。设计取舍见 `docs/adr/`。
 
@@ -154,7 +160,7 @@ swift build -c release && .build/release/PodLyrics &
 
 **跳转。** 比较 MediaRemote 上报位置和本地推算；差距大就丢掉旧锁，从上报位置附近重新搜，连续失败则放宽到全集（约 1 秒）。跳转后一般要 3–5 秒才能重新锁上，因为采集缓冲必须全部换成跳转后的音频。
 
-**回退。** 没有本地文件时，用辅助功能读取官方字幕面板正在高亮的段落，映射回 TTML 再在段内外推——面板需打开（可以盖住，不能最小化）。两种信号都没有时，按 MediaRemote 的进度和倍速外推。
+**回退。** 音频锁未握住时（在线流播，或已下载但仍在搜索），用辅助功能读取官方字幕面板正在高亮的段落，映射回 TTML 再在段内外推——面板需打开（可以盖住，不能最小化）。两种信号都没有时，按 MediaRemote 的进度和倍速外推。
 
 **MediaRemote。** macOS 15.4 起只对 Apple 签名进程返回数据，因此查询跑在 `/usr/bin/swift` 子进程里，结果以 JSON 行流回。
 
@@ -175,6 +181,8 @@ MIT
 
 # English
 
+[中文](#podlyrics)
+
 Floating, always-on-top transcript overlay for Apple Podcasts on macOS — desktop lyrics, but for podcasts. Downloaded episodes lock to the audio you actually hear. Words above your level are glossed inline in Chinese, with an episode wordlist and a wordbook for preview before listening and review afterwards.
 
 No account. Offline by default: transcripts, alignment and the dictionary all come from data Apple Podcasts already caches. The only optional network use is context glosses against an endpoint you configure.
@@ -183,11 +191,11 @@ No account. Offline by default: transcripts, alignment and the dictionary all co
 
 - Translucent, draggable, always-on-top overlay over any app and fullscreen Spaces; menu-bar only, no Dock icon
 - Previous / current / next line, with word-by-word highlighting
-- Downloaded episodes: aligned to Podcasts’ own audio output, including dynamically inserted ads (shows “广告中” during a break, then stays in sync)
+- Downloaded episodes: aligned to Podcasts’ own audio output, including dynamically inserted ads (current line goes blank during a break; “next” previews where the show resumes)
 - Follows pause, seeking, skip, chapter jumps and Podcasts’ 0.8×–2× speed
 - Streaming (not downloaded) falls back to the official transcript panel — less precise
 - Optional one-line sync monitor (source + offset)
-- **Vocabulary** (on by default, level **四级** / CET-4): harder words render as `word(释义)`; per-episode wordlist and full text; a wordbook with real sentences from your library; optional OpenAI-compatible context glosses
+- **Vocabulary** (default level **四级** / CET-4): harder words render as `word(释义)`; per-episode wordlist and full text; a wordbook with real sentences from your library; optional OpenAI-compatible context glosses
 
 ## Requirements
 
@@ -216,12 +224,12 @@ swift build -c release && .build/release/PodLyrics &
 ## First run
 
 1. Open PodLyrics. A translucent panel appears at the bottom centre of the screen (it says「等待播放…」until something is playing). A bubble icon appears in the menu bar.
-2. Grant the prompts that appear on launch:
-   - **Screen & System Audio Recording** — Podcasts’ output only; never the microphone or other apps. System Settings → Privacy & Security → Screen & System Audio Recording.
-   - **Accessibility** — requested at launch; used when a streaming (not downloaded) episode needs the official transcript panel. System Settings → Privacy & Security → Accessibility → **+** → `/Applications/PodLyrics.app`. For the bare binary, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> and enter the full path to `.build/release/PodLyrics` (`.build` is hidden).
+2. Grant the prompts macOS shows:
+   - **Accessibility** — requested at launch. Used whenever the audio lock is not held (streaming, or a download still searching) to read the paragraph the official transcript panel is highlighting. System Settings → Privacy & Security → Accessibility → **+** → `/Applications/PodLyrics.app`. For the bare binary, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> and enter the full path to `.build/release/PodLyrics` (`.build` is hidden).
+   - **Screen & System Audio Recording** — asked the first time audio alignment starts on a downloaded episode. Podcasts’ output only; never the microphone or other apps. System Settings → Privacy & Security → Screen & System Audio Recording.
 3. In Apple Podcasts:
    1. **Download** the episode (the download arrow). Downloaded episodes use audio sync; streaming uses the panel fallback.
-   2. **Play** it and tap the **transcript (speech bubble)** button once so Podcasts caches the TTML. You can close the panel afterwards (keep it open if you rely on the streaming fallback; see Limitations).
+   2. **Play** it and tap the **transcript (speech bubble)** button once so Podcasts caches the TTML. After an audio lock you can close the panel; keep it open if you are on the panel fallback (see Limitations).
 4. The overlay starts following once playback is detected. Right-click the overlay → **我的水平** and pick your level (default **四级**). Words at or below that level are treated as known.
 
 The first time the app reads Podcasts’ cache folder, macOS may also ask for folder access.
@@ -298,18 +306,24 @@ If the subtitles look wrong, this line tells you whether the audio lock is held 
 | Overlay dragged off-screen | Menu bar →「重置字幕位置」 |
 | A word you know is marked / one you don’t isn’t | Mark it Known or bookmark it in the episode wordlist; the level is only a default |
 | Verbose logs | `PODLYRICS_DEBUG=1 .build/release/PodLyrics` — locks, rejections and timeline segments go to stderr |
-| Check a line without playing | `PODLYRICS_PREVIEW="<transcriptID>\|<seconds>" .build/release/PodLyrics` |
+| Check a line without playing | See `PODLYRICS_PREVIEW` below |
 
 ## Development
 
-`make-app.sh` ad-hoc signs the bundle. Accessibility TCC is tied to that signature, so every rebuild looks like a new app. For a stable permission, put a codesigning certificate named `PodLyrics Dev` in the login keychain (self-signed is fine), or set `PODLYRICS_SIGN_IDENTITY`.
+`make-app.sh` ad-hoc signs the bundle unless a `PodLyrics Dev` codesigning certificate is in the login keychain (or `PODLYRICS_SIGN_IDENTITY` is set). Accessibility TCC is tied to that signature, so an ad-hoc rebuild looks like a new app. A stable identity keeps the permission across rebuilds (self-signed is fine).
 
 | Variable | Purpose |
 | --- | --- |
 | `PODLYRICS_DEBUG=1` | Alignment / timeline debug logs on stderr |
-| `PODLYRICS_PREVIEW=<transcriptID>\|<seconds>` | Show one line of a cached transcript without playback |
+| `PODLYRICS_PREVIEW` | Show one line of a cached transcript without playback. Value is transcriptID and seconds, separated by a vertical bar |
 | `PODLYRICS_API_KEY` | Gloss API key, skipping the Keychain |
 | `PODLYRICS_SIGN_IDENTITY` | Identity used by `make-app.sh` (default `PodLyrics Dev`) |
+
+Preview one line (vertical bar between transcriptID and seconds):
+
+```bash
+PODLYRICS_PREVIEW="<transcriptID>|<seconds>" .build/release/PodLyrics
+```
 
 `Sources/PodLyrics/Resources/lexicon.sqlite` is produced by `tools/build-lexicon.py` from ECDICT 1.0.28. Design notes: `docs/adr/`.
 
@@ -323,7 +337,7 @@ If the subtitles look wrong, this line tells you whether the audio lock is held 
 
 **Seeks.** A jump is MediaRemote’s position disagreeing with ours; the stale lock is dropped and search widens from the reported position up to the whole file (~1 s). Re-lock typically takes 3–5 s after the last jump, because the capture buffer must be entirely post-seek audio.
 
-**Fallbacks.** With no local file, Accessibility reads the paragraph the official panel is highlighting, maps it back to TTML and extrapolates inside that paragraph — the panel must stay open (covered is fine, minimized is not). With neither signal, MediaRemote’s position and rate are extrapolated.
+**Fallbacks.** When the audio lock is not held (streaming, or a download still searching), Accessibility reads the paragraph the official panel is highlighting, maps it back to TTML and extrapolates inside that paragraph — the panel must stay open (covered is fine, minimized is not). With neither signal, MediaRemote’s position and rate are extrapolated.
 
 **MediaRemote.** Since macOS 15.4 the private API only answers Apple-signed processes, so the query runs inside `/usr/bin/swift` and streams JSON lines back.
 

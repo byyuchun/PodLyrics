@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: NSPanel!
     private let viewModel = LyricsViewModel()
     private var statusItem: NSStatusItem!
+    private let mainWindow = MainWindowController()
+    private var openObserver: NSObjectProtocol?
 
     private static let panelSize = NSSize(width: 720, height: 130)
 
@@ -36,11 +38,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.delegate = self
 
         let host = NSHostingView(rootView: LyricsView(model: viewModel))
-        panel.contentView = host
+        // Right-click menu lives in AppKit: the SwiftUI view re-renders every
+        // 100 ms for word highlighting, which makes a SwiftUI contextMenu
+        // flicker and swallow clicks.
+        let container = ContextMenuView(frame: host.bounds)
+        container.autoresizingMask = [.width, .height]
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        container.menuProvider = { [weak self] in self?.buildPanelMenu() }
+        panel.contentView = container
         panel.orderFrontRegardless()
 
         setupStatusItem()
-        viewModel.start()
+        if let spec = ProcessInfo.processInfo.environment["PODLYRICS_PREVIEW"] {
+            let parts = spec.split(separator: "|")
+            if parts.count == 2, let secs = Double(parts[1]) {
+                viewModel.preview(transcriptID: String(parts[0]), at: secs)
+            }
+        } else {
+            viewModel.start()
+        }
+        openObserver = NotificationCenter.default.addObserver(forName: .openMainWindow, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.openMainWindow() }
+        }
+        if ProcessInfo.processInfo.environment["PODLYRICS_OPEN_MAIN"] != nil { openMainWindow() }
+        if let path = ProcessInfo.processInfo.environment["PODLYRICS_PANEL_SNAPSHOT"] {
+            Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let view = self?.panel.contentView,
+                          let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                    view.cacheDisplay(in: view.bounds, to: rep)
+                    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+                }
+            }
+        }
+    }
+
+    @objc private func openMainWindow() {
+        mainWindow.show()
     }
 
     /// Bottom-centre of the main screen, just above the Dock.
@@ -88,6 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = NSImage(
             systemSymbolName: "captions.bubble", accessibilityDescription: "PodLyrics")
         let menu = NSMenu()
+        menu.addItem(withTitle: "打开 PodLyrics…", action: #selector(openMainWindow), keyEquivalent: "o")
+            .target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "显示/隐藏字幕", action: #selector(toggle), keyEquivalent: "t")
             .target = self
         menu.addItem(withTitle: "重置字幕位置", action: #selector(resetPosition), keyEquivalent: "r")
@@ -99,6 +137,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggle() {
         if panel.isVisible { panel.orderOut(nil) } else { clampToScreen(); panel.orderFrontRegardless() }
+    }
+
+    // MARK: Overlay context menu
+
+    private func buildPanelMenu() -> NSMenu {
+        let menu = NSMenu()
+        let levelItem = NSMenuItem(title: "我的水平", action: nil, keyEquivalent: "")
+        let levels = NSMenu()
+        for level in Proficiency.choices {
+            let item = NSMenuItem(title: level.displayName, action: #selector(pickLevel(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = level.rawValue
+            item.state = level == viewModel.proficiency ? .on : .off
+            levels.addItem(item)
+        }
+        levelItem.submenu = levels
+        menu.addItem(levelItem)
+
+        let monitor = NSMenuItem(title: "显示同步监控", action: #selector(toggleMonitor), keyEquivalent: "")
+        monitor.target = self
+        monitor.state = viewModel.showMonitor ? .on : .off
+        menu.addItem(monitor)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "打开 PodLyrics…", action: #selector(openMainWindow), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "隐藏（菜单栏图标可再显示）", action: #selector(hidePanel), keyEquivalent: "").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "退出 PodLyrics", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        return menu
+    }
+
+    @objc private func pickLevel(_ sender: NSMenuItem) {
+        if let level = Level(rawValue: sender.tag) { viewModel.proficiency = level }
+    }
+
+    @objc private func toggleMonitor() { viewModel.showMonitor.toggle() }
+    @objc private func hidePanel() { panel.orderOut(nil) }
+}
+
+/// Hosts the SwiftUI overlay and serves a native right-click menu.
+final class ContextMenuView: NSView {
+    var menuProvider: (() -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        menuProvider?() ?? super.menu(for: event)
     }
 }
 

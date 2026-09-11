@@ -13,6 +13,16 @@ final class LyricsViewModel: ObservableObject {
     @Published var status: String = "等待播放…"
     @Published var hasTranscript = false
     @Published var currentIndex: Int = -1
+    /// Word index -> annotation for the current line.
+    @Published var currentAnnotations: [Int: Annotation] = [:]
+    @Published var proficiency: Level = Proficiency.current {
+        didSet {
+            guard oldValue != proficiency else { return }
+            Proficiency.current = proficiency
+            reannotate()
+            prefetchGlosses()
+        }
+    }
 
     private var helper: MediaRemoteHelper?
     private let axReader = AXHighlightReader()
@@ -20,6 +30,10 @@ final class LyricsViewModel: ObservableObject {
     private var transcript: Transcript?
     private var loadedTranscriptID: String?
     private var tickTimer: Timer?
+    private var annotator: Annotator?
+    private var annotated: AnnotatedTranscript?
+    private var glosses: [String: String] = [:]
+    private var observers: [NSObjectProtocol] = []
 
     /// Anchor for extrapolating the playback position: `anchorSeconds` was the
     /// true position at wall-clock `anchorDate`.
@@ -155,10 +169,57 @@ final class LyricsViewModel: ObservableObject {
         }
     }
 
+    init() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: UserStore.didChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.reannotate() }
+        })
+        observers.append(center.addObserver(forName: UserStore.glossesDidChange, object: nil, queue: .main) { [weak self] note in
+            Task { @MainActor in
+                guard let self, let id = note.object as? String, id == self.loadedTranscriptID else { return }
+                self.reloadGlosses()
+                self.reannotate()
+            }
+        })
+        observers.append(center.addObserver(forName: GlossService.settingsDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.reloadGlosses()
+                self.reannotate()
+                self.prefetchGlosses()
+            }
+        })
+        // Proficiency may be changed from the main window as well.
+        observers.append(center.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, Proficiency.current != self.proficiency else { return }
+                self.proficiency = Proficiency.current
+            }
+        })
+    }
+
+    /// Debug aid (PODLYRICS_PREVIEW=<transcriptID>|<seconds>): load a cached
+    /// transcript and show the line at that position without any playback.
+    func preview(transcriptID: String, at seconds: Double) {
+        snapshot = NowPlayingSnapshot(title: "preview", transcriptID: transcriptID, localAudioURL: nil,
+                                      elapsed: seconds, rate: 0, duration: 0, timestamp: Date())
+        loadTranscript(id: transcriptID)
+        guard let transcript, let idx = transcript.index(at: seconds) else { return }
+        let line = transcript.lines[idx]
+        currentIndex = idx
+        previousLine = idx > 0 ? transcript.lines[idx - 1].text : ""
+        currentWords = line.words.map(\.text)
+        currentAnnotations = annotated?.annotations(line: idx) ?? [:]
+        nextLine = idx + 1 < transcript.lines.count ? transcript.lines[idx + 1].text : ""
+        spokenWordCount = line.words.lastIndex(where: { $0.begin <= seconds }).map { $0 + 1 } ?? 0
+    }
+
     func stop() {
         helper?.stop()
         aligner?.stop()
         tickTimer?.invalidate()
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        observers.removeAll()
     }
 
     private func apply(_ snap: NowPlayingSnapshot?) {
@@ -218,8 +279,20 @@ final class LyricsViewModel: ObservableObject {
             alignerURL = url
             lastAudioLock = .distantPast
             if let url {
-                do { aligner = try AudioAligner(audioURL: url) } catch {
-                    NSLog("PodLyrics: cannot open episode audio \(url.path): \(error)")
+                // Opening the episode file can stall for a long time (first
+                // access to another app's container triggers a system
+                // permission prompt), so never do it on the main thread.
+                Task.detached(priority: .userInitiated) {
+                    let opened: AudioAligner?
+                    do { opened = try AudioAligner(audioURL: url) } catch {
+                        NSLog("PodLyrics: cannot open episode audio \(url.path): \(error)")
+                        opened = nil
+                    }
+                    await MainActor.run { [weak self] in
+                        guard let self, self.alignerURL == url else { opened?.stop(); return }
+                        self.aligner = opened
+                        if self.playbackRate > 0 { opened?.ensureCapturing() }
+                    }
                 }
             }
         }
@@ -300,12 +373,54 @@ final class LyricsViewModel: ObservableObject {
             loadedTranscriptID = id
             hasTranscript = true
             currentIndex = -1
+            annotator = Annotator(transcriptID: id, transcript: t)
+            reloadGlosses()
+            reannotate()
+            prefetchGlosses()
         } else {
             transcript = nil
             loadedTranscriptID = nil
             hasTranscript = false
+            annotator = nil
+            annotated = nil
+            currentAnnotations = [:]
             status = "字幕尚未缓存：请在 Podcasts 里打开一次字幕面板"
         }
+    }
+
+    private func reloadGlosses() {
+        guard let id = loadedTranscriptID, let model = GlossService.activeModel else {
+            glosses = [:]
+            return
+        }
+        glosses = UserStore.shared.glosses(transcriptID: id, model: model)
+    }
+
+    /// Re-run the (cheap) filtering step: after Proficiency, Wordbook/Known
+    /// or gloss changes. Token resolution is kept from `annotator`.
+    private func reannotate() {
+        guard let annotator else { return }
+        annotated = annotator.annotate(proficiency: proficiency, glosses: glosses)
+        if currentIndex >= 0 {
+            currentAnnotations = annotated?.annotations(line: currentIndex) ?? [:]
+        }
+    }
+
+    private func prefetchGlosses() {
+        guard let annotator else { return }
+        guard GlossService.shared.isEnabled else {
+            if Self.debug { NSLog("gloss: provider disabled or incomplete (\(ProviderSettings.load().debugSummary))") }
+            return
+        }
+        // On first load the tick loop hasn't run yet; derive the line from
+        // the player's reported position so upcoming words are glossed first.
+        var from = max(currentIndex, 0)
+        if currentIndex < 0, let snap = snapshot, let t = annotator.transcript.index(at: snap.elapsed) {
+            from = t
+        }
+        let candidates = annotator.glossCandidates(proficiency: proficiency, existing: glosses, from: from)
+        if Self.debug { NSLog("gloss: requesting \(candidates.count) headwords from line \(from)") }
+        GlossService.shared.request(transcriptID: annotator.transcriptID, candidates: candidates)
     }
 
     private func tick() {
@@ -320,6 +435,7 @@ final class LyricsViewModel: ObservableObject {
                 currentIndex = -2
                 previousLine = ""
                 currentWords = []
+                currentAnnotations = [:]
                 spokenWordCount = 0
                 let resume = timelineMap?.nextSegmentStart(after: fileTime)
                     .flatMap { timelineMap?.transcriptTime(forFile: $0) }
@@ -331,6 +447,7 @@ final class LyricsViewModel: ObservableObject {
         guard let idx = transcript.index(at: t) else {
             previousLine = ""
             currentWords = []
+            currentAnnotations = [:]
             spokenWordCount = 0
             nextLine = transcript.lines.first?.text ?? ""
             return
@@ -341,6 +458,7 @@ final class LyricsViewModel: ObservableObject {
             currentIndex = idx
             previousLine = idx > 0 ? lines[idx - 1].text : ""
             currentWords = line.words.map(\.text)
+            currentAnnotations = annotated?.annotations(line: idx) ?? [:]
             nextLine = idx + 1 < lines.count ? lines[idx + 1].text : ""
         }
         let spoken = line.words.lastIndex(where: { $0.begin <= t }).map { $0 + 1 } ?? 0

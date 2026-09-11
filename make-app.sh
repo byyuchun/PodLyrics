@@ -16,12 +16,16 @@ CONTENTS="$APP_DIR/Contents"
 echo "==> swift build -c release"
 swift build -c release
 
-BIN="$(swift build -c release --show-bin-path)/$APP_NAME"
+BIN_DIR="$(swift build -c release --show-bin-path)"
+BIN="$BIN_DIR/$APP_NAME"
 
 echo "==> assembling $APP_NAME.app"
 rm -rf "$APP_DIR"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BIN" "$CONTENTS/MacOS/$APP_NAME"
+# SwiftPM resources (bundled lexicon); Bundle.module looks for this next to
+# the executable's bundle Resources directory.
+cp -R "$BIN_DIR/${APP_NAME}_${APP_NAME}.bundle" "$CONTENTS/Resources/"
 
 cat > "$CONTENTS/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -86,8 +90,19 @@ else
     echo "    (icon rendering failed, using default icon)"
 fi
 
-echo "==> codesign (ad-hoc)"
-codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_DIR"
+# Accessibility (TCC) trust is tied to the signature. An ad-hoc signature is
+# just the binary's hash, so every rebuild looks like a new app and macOS asks
+# for the permission again. Signing with a stable identity (any certificate in
+# the login keychain named "PodLyrics Dev", self-signed is fine) makes the
+# permission survive rebuilds. Falls back to ad-hoc when no such identity exists.
+SIGN_IDENTITY="${PODLYRICS_SIGN_IDENTITY:-PodLyrics Dev}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$SIGN_IDENTITY\""; then
+    echo "==> codesign ($SIGN_IDENTITY)"
+    codesign --force --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" --timestamp=none "$APP_DIR"
+else
+    echo "==> codesign (ad-hoc; Accessibility permission will not survive rebuilds)"
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$APP_DIR"
+fi
 
 echo "==> done: $APP_DIR"
 

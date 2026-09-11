@@ -5,6 +5,10 @@ let package = Package(
     name: "PodLyrics",
     platforms: [.macOS("14.2")],
     targets: [
-        .executableTarget(name: "PodLyrics", path: "Sources/PodLyrics")
+        .executableTarget(
+            name: "PodLyrics",
+            path: "Sources/PodLyrics",
+            resources: [.copy("Resources/lexicon.sqlite")]
+        )
     ]
 )

@@ -1,277 +1,341 @@
 # PodLyrics
 
-**English** | [中文](#中文)
+**中文** | [English](#english)
 
-Floating real-time transcript overlay for Apple Podcasts on macOS — like desktop lyrics, but for podcasts. Millisecond-accurate, fully offline. Marks the words above your level inline with a Chinese gloss, and keeps a wordbook so you can preview an episode before listening or review it afterwards.
+听 Apple Podcasts 时，把官方逐词字幕叠在桌面上——类似桌面歌词，专门给播客用。已下载的剧集会按你听到的声音对齐；超出你水平的词会在字幕里标出中文释义，并带剧集词表和生词本，听前预习、听后复盘。
 
 ![macOS](https://img.shields.io/badge/macOS-14.2%2B-blue) ![Swift](https://img.shields.io/badge/Swift-5.9-orange) ![License](https://img.shields.io/badge/license-MIT-green)
 
-## What it does
-
-While you listen to an episode in Apple Podcasts, PodLyrics shows a translucent always-on-top window with the previous, current and next sentence of the official transcript, highlighting each word as it is spoken. It follows play/pause, seeking, skipping and speed changes, works over fullscreen apps, and needs no account, no internet and no configuration.
-
-Unlike the built-in transcript panel, it stays visible over whatever you are doing, and it is synced to the **actual audio coming out of the Podcasts process**, not to an estimated clock.
-
-## Features
-
-- Always-on-top floating subtitle window, visible over any app and fullscreen Spaces
-- Word-by-word highlighting with ±1 ms alignment to the audio you hear
-- Previous / current / next line with smooth scrolling animation
-- Handles dynamically inserted ads: subtitles stay correct after every ad break, and show "ad" while one plays
-- Follows seeking, skip buttons, chapter jumps and 0.8×–2× playback speed
-- Draggable, translucent, menu-bar controlled — no Dock icon
-- Optional one-line sync monitor so you can see exactly what it is doing
-- No configuration, no account, fully offline: everything comes from data Apple Podcasts already caches on your Mac
-- **Vocabulary learning** (optional): words above your level are shown inline as `word(释义)`; an Episode Wordlist for pre-listening preview and post-listening review; a Wordbook with real sentences from your episodes; optional context glosses from your own LLM endpoint
-
-## Vocabulary learning
-
-PodLyrics ships a trimmed copy of [ECDICT](https://github.com/skywind3000/ECDICT) (43k headwords, 7 MB, offline). Every word in a transcript is mapped to its headword (`negotiated → negotiate`) and to an exam level: 初中 / 高中 / 四级 / 六级 / 考研 / 托福雅思 / GRE.
-
-**My level (我的水平).** Pick the level you are at (right-click the overlay, or Settings in the main window). Words at or below that level are treated as known; only harder words are annotated. Two personal lists override the level: words in your **Wordbook (生词本)** are always annotated, words marked **Known (已掌握)** never are.
-
-**Main window.** Menu-bar icon → 打开 PodLyrics…:
-
-- **剧集库** lists every episode whose transcript is cached on this Mac (open the transcript panel once in Podcasts to cache one). Select an episode to see its **词表** — all words that would be annotated, grouped by level with meaning, count and an example sentence — or the **全文** with annotated words highlighted. The same page serves as preview before listening and review afterwards; bookmark words into the Wordbook or tick them as Known right there.
-- **生词本** shows your words with every sentence they appeared in across your episodes.
-- **设置** holds your level and the optional LLM provider.
-
-**Context glosses (optional, off by default).** ECDICT gives general definitions; a podcast often uses a word in a specific sense (*pitch*, *chunk*). In Settings you can enable any OpenAI-compatible endpoint (OpenAI, DeepSeek, Moonshot, Ollama, …) with your own Base URL, model name and API key. When enabled, the annotated words of the current episode — together with the sentence each first appears in — are sent in batches of 40 to that endpoint for a short context-specific Chinese gloss, starting from the current playback position. Results are cached per episode and model in `~/Library/Application Support/PodLyrics/user.sqlite` and never requested twice. The API key is stored in the macOS Keychain.
-
-**Privacy.** With the provider disabled the app is completely offline. With it enabled, transcript sentences of the episodes you play (not audio, not your library) are sent to the endpoint you configured, and to nobody else.
-
-## Quick start
-
-```bash
-git clone https://github.com/byyuchun/PodLyrics.git
-cd PodLyrics
-./make-app.sh --install   # builds PodLyrics.app and copies it to /Applications
-```
-
-Then launch **PodLyrics** from Launchpad / Spotlight like any other app (it lives in the menu bar, no Dock icon). To auto-start at login: System Settings → General → Login Items → **+** → PodLyrics.
-
-If you prefer running the bare binary: `swift build -c release && .build/release/PodLyrics &`.
-
-Then, in Apple Podcasts:
-
-1. **Download** the episode (the download arrow next to it). Downloaded episodes get audio-based sync; streaming episodes fall back to the transcript-panel method described below.
-2. **Play** it and click the **transcript (speech bubble) button** in the player once. This makes Podcasts cache the transcript locally. You can close the panel afterwards.
-3. The floating window appears at the bottom of your screen and starts following along within a few seconds.
-
-Two macOS permissions may be requested on first run:
-
-- **System Audio Recording** — PodLyrics listens to Podcasts' own audio output (only that process; never the microphone, never other apps). Allow it under System Settings → Privacy & Security → Screen & System Audio Recording.
-- **Accessibility** — only needed for the fallback sync method used with streaming (non-downloaded) episodes. System Settings → Privacy & Security → Accessibility → **+** → pick `/Applications/PodLyrics.app` (or, for the bare binary, press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> and enter the full path to `.build/release/PodLyrics`; `.build` is hidden).
-
-## Requirements
-
-- macOS 14.2 or later (developed and tested on macOS 26)
-- Xcode Command Line Tools (`xcode-select --install`) — used both to build and, at runtime, as the Apple-signed `swift` interpreter for the MediaRemote helper
-- An episode with an Apple-provided transcript (most English-language podcasts have one)
-
-## Daily use
-
-| Action | How |
-| --- | --- |
-| Move the window | Drag it anywhere |
-| Hide / show | Menu-bar captions icon → “显示/隐藏字幕”, or right-click the window → hide |
-| Change my level | Right-click the window → “我的水平”, or main window → 设置 |
-| Open the main window (episodes, wordbook, settings) | Menu-bar icon → “打开 PodLyrics…” (⌘O), or right-click the window |
-| Show the sync monitor | Right-click the window → “显示同步监控” |
-| Quit | Right-click the window → quit, or menu-bar icon → 退出 |
-| Start | Open **PodLyrics** from Launchpad / Spotlight (or `.build/release/PodLyrics &`) |
-| Stop from a terminal | `pkill -x PodLyrics` |
-
-### The sync monitor
-
-Turn it on from the window's context menu. A small monospaced line appears under the subtitles, for example:
-
-```
-音频锁定 · 文件 6:31.93 · 字幕 5:43.04 (-48.9s) · 3 段
-```
-
-- **音频锁定 / 字幕面板 / 搜索中 / MediaRemote 外推** — which sync source is currently driving the subtitles, from most to least precise.
-- **文件** — position inside the audio file Podcasts is playing.
-- **字幕** — the corresponding position on the transcript's timeline, with the offset in parentheses. The offset is the cumulative length of inserted ads before this point.
-- **N 段** — how many constant-offset segments the episode was split into (one more than the number of ad breaks found).
-- **广告中** replaces the transcript position while an ad plays; the "next line" slot shows where the programme resumes.
-- **正在校准时间轴…** appears for the first few seconds of a new episode while the ad map is being built.
-
-If the subtitles ever look wrong, this line tells you whether the audio lock is held and which offset is being applied.
-
-## How it works
-
-**Transcript data.** Apple Podcasts caches official transcripts as TTML files with word-level timestamps under `~/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Library/Cache/Assets/TTML/`. The private MediaRemote framework tells us which transcript belongs to the episode playing now, and — for downloaded episodes — the path of the cached MP3.
-
-**Audio alignment.** PodLyrics attaches a Core Audio *process tap* to Podcasts and keeps the last few seconds of its output in memory. Every two seconds it cross-correlates that buffer with the episode file on disk (FFT-based, via Accelerate). The correlation peak gives the exact file position at a known wall-clock instant; the overlay then advances from that anchor at the playback rate. At 1× this matches the raw waveform; at other speeds Podcasts time-stretches the audio so the waveform no longer lines up, and an onset-envelope correlation takes over. Measured jitter between consecutive locks is 0–1 ms at 1× and about 2 ms at 2×. CPU cost is well under 1%.
-
-**Ad breaks.** Downloaded episodes usually contain dynamically inserted ads, while the TTML is timed against the clean programme, so a file position is off by the total ad length so far (49 s and 97 s in one test episode). Podcasts solves this for its own panel by shipping a ShazamKit signature of the clean audio next to every transcript. PodLyrics reads that signature, probes the file every 5 s against it, merges probes with the same offset into segments and refines the boundaries by bisection. The resulting piecewise map translates file time into transcript time; gaps are ads. Building the map takes about 3 s per episode and runs in the background.
-
-**Seeking and speed changes.** A jump is detected by comparing MediaRemote's reported position with our own; the stale audio lock is dropped and a new search begins around the reported position, widening step by step up to the whole episode if MediaRemote's report turns out to be off (a full-episode search costs about a second). Re-lock typically takes 3–5 s after the last jump, because the captured buffer must be entirely post-seek audio.
-
-**Fallbacks.** For streaming episodes there is no file to correlate against. PodLyrics then reads the paragraph the official transcript panel is highlighting through the Accessibility API, maps it back to the TTML timeline and extrapolates inside the paragraph — the panel must be open (it may be covered, but not minimized). With neither signal available it extrapolates from MediaRemote's reported position and rate.
-
-**MediaRemote helper.** Since macOS 15.4 MediaRemote only answers Apple-signed processes, so the query runs inside the Apple-signed `/usr/bin/swift` interpreter as a child process that streams now-playing info back as JSON lines.
-
-**Vocabulary.** `Sources/PodLyrics/Resources/lexicon.sqlite` is generated by `tools/build-lexicon.py` from the ECDICT release: headwords that have a frequency rank or an exam tag, plus an inflection table built from ECDICT's `exchange` field. Level comes from the exam tags (lowest tag wins), falling back to COCA/BNC rank. Episode metadata for the library comes from a read-only snapshot of Podcasts' own `MTLibrary.sqlite`; if that ever fails, the library still lists the cached TTML files, just without titles. Design notes live in `docs/adr/`.
-
-## Troubleshooting
-
-| Symptom | Cause / fix |
-| --- | --- |
-| “字幕尚未缓存” | Open the transcript panel once for this episode so Podcasts downloads the TTML. |
-| “本集没有字幕” | Apple has not published a transcript for this episode. |
-| Monitor shows 字幕面板 or MediaRemote 外推 for a downloaded episode | System Audio Recording permission was denied, or the tap failed. Check System Settings → Privacy & Security → Screen & System Audio Recording. |
-| Monitor shows 搜索中 for more than ~10 s | Podcasts is not outputting audio (paused, muted, or routed to a device the tap cannot follow), or the file on disk differs from what is playing. |
-| Subtitles freeze for a streaming episode | The Podcasts window is minimized; the panel stops rendering. Cover it instead. |
-| Want detailed logs | Run with `PODLYRICS_DEBUG=1 .build/release/PodLyrics` — every lock, rejection and timeline segment is logged to stderr. |
-| A word is annotated that you know / one you don't isn't | Tick it as Known (or bookmark it) in the episode wordlist; the level is only a default. |
-| Want to check annotations without playing | `PODLYRICS_PREVIEW="<transcriptID>\|<seconds>" .build/release/PodLyrics` shows that line of a cached transcript in the overlay. |
-
-## Limitations
-
-- Only works with episodes for which Apple provides a transcript.
-- Audio alignment and ad mapping require the episode to be downloaded; streaming episodes use the less precise panel-based sync.
-- Relies on the private MediaRemote framework, Podcasts' cache layout and its accessibility tree; major macOS updates may require adjustments.
-
-## License
-
-MIT
-
----
-
-# 中文
-
-macOS 悬浮字幕工具：实时显示 Apple Podcasts 正在播放剧集的官方字幕，逐词高亮，类似音乐软件的桌面歌词。毫秒级同步，完全离线。超出你水平的词会在字幕里直接标出中文释义，并附带生词本，听前可预习、听后可复盘。
-
-## 它是什么
-
-你在 Apple Podcasts 里听节目时，PodLyrics 在屏幕上叠一个半透明、置顶的小窗，显示官方字幕的上一句 / 当前句 / 下一句，说到哪个词就亮哪个词。播放、暂停、拖进度条、快进快退、切倍速都会自动跟随，在全屏应用上也能显示；不需要账号、不需要联网、不需要任何配置。
-
-和 Podcasts 自带的字幕面板不同，它始终浮在你正在做的事情上面，而且同步依据是 **Podcasts 进程真实输出的音频**，不是估算的时钟。
+不需要账号。默认完全离线：字幕、对齐和词典都来自本机已有数据。可选的语境释义才会访问你自己配置的模型接口。
 
 ## 功能
 
-- 悬浮字幕窗置顶于所有应用与全屏 Space
-- 逐词高亮，与你听到的声音对齐误差 ±1 ms
-- 上一句 / 当前句 / 下一句三行显示，平滑滚动动画
-- 正确处理动态插入的广告：每段广告之后字幕依然对得上，广告播放时显示「广告中」
-- 跟随拖进度条、快进快退按钮、章节跳转和 0.8×–2× 倍速
-- 可拖动、半透明、菜单栏控制，无 Dock 图标
-- 可选的一行同步监控，随时看清它在用什么信号、偏移多少
-- 无需配置、无需账号、完全离线：所有数据都来自 Apple Podcasts 已经缓存在本机的内容
-- **词汇学习**（可选）：高于你水平的词以 `word(释义)` 形式内嵌在字幕里；每集有词表，听前预习、听后复盘；生词本带真实例句；可接入自己的大模型获取语境释义
+- 半透明置顶悬浮窗，可拖动，盖在其他应用和全屏 Space 上；无 Dock 图标，由菜单栏控制
+- 上一句 / 当前句 / 下一句，说到哪个词就亮哪个词
+- 已下载剧集：用 Podcasts 进程的真实音频对齐字幕，并处理动态插入的广告（广告期间显示「广告中」，结束后继续对得上）
+- 跟随暂停、拖进度条、跳过、章节跳转和倍速（Podcasts 支持的 0.8×–2×）
+- 在线流播（未下载）时退回官方字幕面板同步，精度较低
+- 可选一行同步监控，显示当前同步源和偏移
+- **词汇标注**（默认开启，水平为「四级」）：高于你水平的词显示为 `word(释义)`；每集有词表和全文；生词本带本机例句；可接入自己的 OpenAI 兼容接口做语境释义
 
-## 词汇学习
+## 环境要求
 
-PodLyrics 内置一份裁剪过的 [ECDICT](https://github.com/skywind3000/ECDICT)（4.3 万词条，7 MB，离线）。字幕里每个词都会归到原形（`negotiated → negotiate`）并对应一个考试档位：初中 / 高中 / 四级 / 六级 / 考研 / 托福雅思 / GRE。
+- macOS 14.2 或更高（需要 Core Audio process tap；在较新的 macOS 上开发，含 macOS 26）
+- [Xcode Command Line Tools](https://developer.apple.com/download/all/?q=command%20line%20tools)（`xcode-select --install`）：编译需要；运行时也要用到带 Apple 签名的 `/usr/bin/swift` 去查询 MediaRemote
+- 剧集需有 Apple 官方 transcript（英文节目覆盖率较高）
 
-**我的水平。** 选一个你所在的档位（右键悬浮窗，或主窗口的「设置」）。该档及以下的词视为已掌握，只有更难的词会被标注。两个个人词表可以覆盖档位判定：**生词本**里的词无论多简单都标，标为**已掌握**的词无论多难都不标。
-
-**主窗口。** 菜单栏图标 →「打开 PodLyrics…」：
-
-- **剧集库**列出本机所有已缓存字幕的剧集（在 Podcasts 里打开一次字幕面板即可缓存）。选中一集看它的**词表**——所有会被标注的词，按档位分组，带释义、出现次数和例句；或看带标注的**全文**。听前打开是预习，听后打开是复盘，就在这里把想学的词收进生词本、把认识的词打勾排除。
-- **生词本**列出你收藏的词，以及它们在你听过的哪些剧集的哪句话里出现过。
-- **设置**放「我的水平」和可选的模型服务。
-
-**语境释义（可选，默认关闭）。** ECDICT 给的是通用释义，而播客里一个词往往只用某个特定义项（*pitch*、*chunk*）。在「设置」里可以启用任意 OpenAI 兼容接口（OpenAI、DeepSeek、Moonshot、Ollama 等），填自己的 Base URL、模型名和 API Key。开启后，当前剧集里被标注的词连同各自首次出现的句子会以每批 40 个发给该接口，从当前播放位置往后优先，换回一条贴合语境的简短中文释义。结果按剧集和模型缓存在 `~/Library/Application Support/PodLyrics/user.sqlite`，不会重复请求。API Key 存在 macOS 钥匙串。
-
-**隐私。** 不开启模型服务时，应用完全离线。开启后，你播放的剧集的字幕句子（不含音频、不含资料库信息）会发送给你自己配置的那个服务，不会发给任何其他人。
-
-## 快速开始
+## 安装
 
 ```bash
 git clone https://github.com/byyuchun/PodLyrics.git
 cd PodLyrics
-./make-app.sh --install   # 编译并生成 PodLyrics.app，拷贝到 /Applications
+./make-app.sh --install   # 编译 PodLyrics.app 并安装到 /Applications
 ```
 
-之后像普通 App 一样从启动台 / Spotlight 打开 **PodLyrics** 即可（它常驻菜单栏，没有 Dock 图标）。想开机自启：系统设置 → 通用 → 登录项 → **+** → PodLyrics。
+只生成当前目录下的 `.app`、不安装：`./make-app.sh`。
 
-如果只想跑裸二进制：`swift build -c release && .build/release/PodLyrics &`。
+之后从启动台或 Spotlight 打开 **PodLyrics**。它只出现在菜单栏（字幕气泡图标），没有 Dock 图标。开机自启：系统设置 → 通用 → 登录项 → **+** → PodLyrics。
 
-然后在 Apple Podcasts 里：
+也可以直接跑二进制：
 
-1. **下载**这一集（剧集旁边的下载箭头）。已下载的剧集走音频同步；在线流播的剧集退回到下文的字幕面板方式。
-2. **播放**，并点一次播放器上的**字幕（气泡）按钮**，让 Podcasts 把字幕缓存到本地。之后面板可以关掉。
-3. 屏幕底部出现悬浮窗，几秒内开始跟随。
+```bash
+swift build -c release && .build/release/PodLyrics &
+```
 
-首次运行 macOS 可能弹出两个权限请求：
+## 第一次使用
 
-- **系统音频录制** —— PodLyrics 只监听 Podcasts 自己的音频输出（仅这个进程；不开麦克风、不采其他应用）。在 系统设置 → 隐私与安全性 → 屏幕与系统音频录制 里允许。
-- **辅助功能** —— 仅在线流播（未下载）剧集的回退同步需要。系统设置 → 隐私与安全性 → 辅助功能 → **+** → 选择 `/Applications/PodLyrics.app`（裸二进制则按 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> 输入 `.build/release/PodLyrics` 的完整路径，`.build` 是隐藏目录）。
+1. 打开 PodLyrics。屏幕底部中央出现半透明悬浮窗（还没在播时显示「等待播放…」），菜单栏出现气泡图标。
+2. 按系统提示授权（启动时就会问）：
+   - **屏幕与系统音频录制** — 只监听 Podcasts 这一个进程的输出，不录麦克风、不采其他应用。系统设置 → 隐私与安全性 → 屏幕与系统音频录制。
+   - **辅助功能** — 启动时就会请求；真正用到是在线流播（未下载）时，用来读官方字幕面板正在高亮的段落。系统设置 → 隐私与安全性 → 辅助功能 → **+** → 选 `/Applications/PodLyrics.app`。若跑的是裸二进制，按 <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> 输入 `.build/release/PodLyrics` 的完整路径（`.build` 是隐藏目录）。
+3. 在 Apple Podcasts 里：
+   1. **下载**这一集（剧集旁的下载箭头）。已下载走音频对齐；只在线播放则走字幕面板回退。
+   2. **播放**，并点一次播放器上的**字幕（气泡）按钮**，让 Podcasts 把 TTML 缓存到本机。之后面板可以关掉（在线流播回退时需要保持面板打开，见下方限制）。
+4. 悬浮窗在检测到播放后开始跟读。右键悬浮窗 → **我的水平**，把档位调成你的水平（默认 **四级**）。该档及以下的词不标，只标更难的词。
 
-## 环境要求
-
-- macOS 14.2 及以上（在 macOS 26 上开发验证）
-- Xcode Command Line Tools（`xcode-select --install`）—— 编译需要，运行时也需要它提供的 Apple 签名 `swift` 解释器来查询 MediaRemote
-- 剧集需有 Apple 官方 transcript（英文播客覆盖率很高）
+第一次访问 Podcasts 的缓存目录时，系统也可能再弹一次文件夹权限，允许即可。
 
 ## 日常使用
 
 | 操作 | 方式 |
 | --- | --- |
 | 移动悬浮窗 | 直接拖动 |
-| 隐藏 / 显示 | 菜单栏字幕气泡图标 →「显示/隐藏字幕」，或右键悬浮窗 → 隐藏 |
-| 调整我的水平 | 右键悬浮窗 →「我的水平」，或主窗口 → 设置 |
-| 打开主窗口（剧集库 / 生词本 / 设置） | 菜单栏图标 →「打开 PodLyrics…」（⌘O），或右键悬浮窗 |
-| 显示同步监控 | 右键悬浮窗 →「显示同步监控」 |
-| 退出 | 右键悬浮窗 → 退出，或菜单栏图标 → 退出 |
-| 启动 | 启动台 / Spotlight 打开 **PodLyrics**（或 `.build/release/PodLyrics &`） |
+| 隐藏 / 显示 | 菜单栏图标 →「显示/隐藏字幕」，或右键悬浮窗 →「隐藏（菜单栏图标可再显示）」 |
+| 窗口拖丢了 | 菜单栏图标 →「重置字幕位置」（回到屏幕底部中央） |
+| 再显示出来 | 启动台 / Spotlight 再点一次 PodLyrics（已在运行时会把悬浮窗唤回可见区域） |
+| 调整我的水平 | 右键悬浮窗 →「我的水平」，或主窗口 → 设置 / 剧集页工具栏 |
+| 打开主窗口 | 菜单栏图标 →「打开 PodLyrics…」，或右键悬浮窗 |
+| 同步监控 | 右键悬浮窗 →「显示同步监控」 |
+| 退出 | 菜单栏图标 →「退出」，或右键悬浮窗 →「退出 PodLyrics」 |
 | 命令行停止 | `pkill -x PodLyrics` |
+
+菜单栏菜单上标了快捷键：<kbd>⌘O</kbd> 打开主窗口，<kbd>⌘T</kbd> 显示/隐藏字幕，<kbd>⌘R</kbd> 重置位置，<kbd>⌘Q</kbd> 退出。它们是该菜单的快捷键，不是系统全局热键。
+
+### 主窗口
+
+菜单栏 →「打开 PodLyrics…」：
+
+- **剧集库** — 本机已缓存字幕的剧集（在 Podcasts 里打开一次字幕面板就会出现）。可搜索节目/标题。选中一集看 **词表**（按档位分组，带释义、次数、例句）或带标注的 **全文**。听前预习、听后复盘用的是同一页；书签收入生词本，勾选标为已掌握。
+- **生词本** — 收藏的词，以及它们在本机哪些剧集的哪句话里出现过。工具栏可切到 **已掌握**。
+- **设置** —「我的水平」和可选的语境释义。
+
+空的剧集库会提示：「没有已缓存字幕的剧集」——先去 Podcasts 打开一次字幕面板。
+
+### 词汇学习
+
+内置一份裁剪过的 [ECDICT](https://github.com/skywind3000/ECDICT) 1.0.28（约 4.3 万词条，约 7 MB，离线）。字幕里的词会还原到原形（`negotiated → negotiate`），并对应考试档位：初中 / 高中 / 四级 / 六级 / 考研 / 托福雅思 / GRE。
+
+**我的水平**可选初中到托福雅思（没有 GRE：选「我认识全部 GRE 词」就没什么可标了）。GRE 档的词一律视为高于你的水平，会被标注。默认四级。两个个人列表会覆盖档位：
+
+- **生词本**里的词无论多简单都标
+- **已掌握**的词无论多难都不标
+- 不在词典里的词（人名、品牌等）永不标注
+
+**语境释义（可选，默认关）。** ECDICT 给通用释义；播客里一个词常用某个义项（*pitch*、*chunk*）。设置里打开「启用语境释义」，填任意 OpenAI 兼容接口的 Base URL（填到 `/v1` 即可）、模型名和 API Key，然后点「保存」。可先「测试连接」。开启后，当前被标注的词连同各自首次出现的句子会按每批 40 个发给该接口，从当前播放位置往后优先。剧集详情里也可以点「生成语境释义」。结果按剧集和模型缓存在 `~/Library/Application Support/PodLyrics/user.sqlite`，不会重复请求。API Key 存在钥匙串。
+
+关闭语境释义时应用完全离线。开启后，只有你播放（或手动生成）的那些字幕句子会发到你配置的那个服务，不含音频、不含资料库。
 
 ### 同步监控
 
-在悬浮窗右键菜单里打开，字幕下方会多一行等宽小字，例如：
+右键悬浮窗打开后，字幕下会多一行等宽小字，例如：
 
 ```
 音频锁定 · 文件 6:31.93 · 字幕 5:43.04 (-48.9s) · 3 段
 ```
 
-- **音频锁定 / 字幕面板 / 搜索中 / MediaRemote 外推** —— 当前驱动字幕的同步源，精度从高到低。
-- **文件** —— 在 Podcasts 正在播放的音频文件里的位置。
-- **字幕** —— 对应到字幕时间轴上的位置，括号里是偏移量，等于这一点之前插入广告的累计时长。
-- **N 段** —— 这一集被切成几个恒定偏移的分段（等于发现的广告数加一）。
-- **广告中** —— 广告播放期间替代字幕位置显示，「下一句」位置会预告节目恢复后的第一句。
-- **正在校准时间轴…** —— 切到新剧集的头几秒，正在后台建立广告映射。
+| 字段 | 含义 |
+| --- | --- |
+| **音频锁定** / **字幕面板** / **搜索中 ±6s** / **MediaRemote 外推** | 当前同步源，精度大致从高到低。「搜索中 ±…s」表示正在放宽搜索范围 |
+| **文件** | 正在播放的音频文件里的位置 |
+| **字幕** | 映射到官方字幕时间轴的位置；括号里是偏移（这一点之前插入广告的累计时长） |
+| **N 段** | 恒定偏移分段数（大约是广告段数 + 1） |
+| **广告中** | 正在播广告；「下一句」会预告节目恢复后的第一句 |
+| **正在校准时间轴…** | 刚切到新剧集，正在后台建广告映射 |
 
-字幕看起来不对时，看这一行就知道音频锁有没有握住、用的是哪个偏移。
-
-## 原理
-
-**字幕数据。** Apple Podcasts 会把官方 transcript 缓存为带词级时间戳的 TTML 文件（`~/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Library/Cache/Assets/TTML/`）。私有框架 MediaRemote 告诉我们当前播放的剧集对应哪个字幕文件，已下载的剧集还会给出缓存 MP3 的路径。
-
-**音频对齐。** PodLyrics 对 Podcasts 进程挂一个 Core Audio 进程级 tap，把最近几秒的输出留在内存里，每 2 秒与磁盘上的剧集文件做一次互相关（基于 Accelerate 的 FFT）。相关峰给出「某个墙钟时刻对应文件里的精确位置」，悬浮窗以此为锚点按倍速推进。1× 时直接匹配波形；其他倍速下 Podcasts 做了保音高的时间拉伸，波形不再对齐，改用起音包络做互相关。实测相邻两次锁定之间抖动 1× 为 0–1 ms、2× 约 2 ms，CPU 占用远低于 1%。
-
-**广告处理。** 下载的剧集通常含动态插入的广告，而 TTML 是按无广告的干净版本标的时间，所以文件位置会比字幕时间多出前面所有广告的总长（测试剧集里分别是 49 秒和 97 秒）。Podcasts 自己的解法是在每份字幕旁边附一份干净音频的 ShazamKit 指纹；PodLyrics 读取这份指纹，每 5 秒探测一次文件，把偏移一致的探测点合并成分段，再用二分把边界精确化。得到的分段映射把文件时间换成字幕时间，映射不到的空洞就是广告。整集建图约 3 秒，后台进行。
-
-**拖动与倍速。** 通过比较 MediaRemote 上报的进度和我们自己的进度来发现跳转；发现后丢弃旧的音频锁，在上报位置附近重新搜索，连续找不到就逐级放宽，直到全集搜索（约 1 秒），以应对连按快进后 MediaRemote 上报滞后的情况。最后一次跳转后一般 3–5 秒重新锁定，因为要等采集缓冲完全变成跳转后的音频。
-
-**回退。** 在线流播的剧集没有文件可比对，此时通过辅助功能接口读取官方字幕面板正在高亮的段落，映射回 TTML 时间轴并在段落内外推——面板需保持打开（可以被盖住，不能最小化）。两种信号都没有时，按 MediaRemote 上报的进度和倍速外推。
-
-**MediaRemote 绕行。** macOS 15.4 起 MediaRemote 只对 Apple 签名进程返回数据，因此查询在 Apple 签名的 `/usr/bin/swift` 解释器子进程中执行，结果以 JSON 行流式传回。
-
-**词汇。** `Sources/PodLyrics/Resources/lexicon.sqlite` 由 `tools/build-lexicon.py` 从 ECDICT 发行包生成：保留有词频或考试标签的词条，并根据 ECDICT 的 `exchange` 字段建立变形→原形表。档位取考试标签中最低的一档，无标签的词按 COCA/BNC 词频兜底。剧集库的元数据来自 Podcasts 自己的 `MTLibrary.sqlite` 只读快照；读不到时仍会列出已缓存的 TTML 文件，只是没有标题。设计取舍记录在 `docs/adr/`。
+字幕看起来不对时，先看这一行：音频锁有没有握住、用的是哪个偏移。
 
 ## 故障排查
 
 | 现象 | 原因 / 处理 |
 | --- | --- |
-| 「字幕尚未缓存」 | 给这一集打开一次字幕面板，让 Podcasts 下载 TTML。 |
-| 「本集没有字幕」 | Apple 没有为这一集提供 transcript。 |
-| 已下载剧集的监控显示「字幕面板」或「MediaRemote 外推」 | 系统音频录制权限被拒，或 tap 建立失败。检查 系统设置 → 隐私与安全性 → 屏幕与系统音频录制。 |
-| 监控长时间（>10 秒）显示「搜索中」 | Podcasts 没有在输出音频（暂停、静音，或输出到 tap 跟不到的设备），或磁盘文件与正在播放的内容不一致。 |
-| 在线流播剧集字幕停住 | Podcasts 窗口被最小化，面板停止渲染。用其他窗口盖住它即可。 |
-| 想看详细日志 | `PODLYRICS_DEBUG=1 .build/release/PodLyrics`，每次锁定、拒绝和时间轴分段都会输出到 stderr。 |
-| 认识的词被标了 / 不认识的词没标 | 在剧集词表里把它标为已掌握（或收进生词本）；档位只是默认值。 |
-| 不播放也想检查标注效果 | `PODLYRICS_PREVIEW="<transcriptID>\|<秒数>" .build/release/PodLyrics` 会在悬浮窗显示某份已缓存字幕的那一行。 |
+| 「等待播放…」或「没有正在播放的内容」 | 先在 Apple Podcasts 里播放一集 |
+| 「字幕尚未缓存：请在 Podcasts 里打开一次字幕面板」 | 给这一集打开一次字幕面板，让 Podcasts 下载 TTML |
+| 「本集没有字幕（Apple 未提供 transcript）」 | Apple 没有为这一集提供 transcript |
+| 已下载剧集的监控一直是「字幕面板」或「MediaRemote 外推」 | 系统音频录制未允许，或 process tap 失败。检查 隐私与安全性 → 屏幕与系统音频录制 |
+| 监控长时间（>10 秒）显示「搜索中」 | Podcasts 没在出声（暂停、静音，或输出到 tap 跟不到的设备），或磁盘文件和正在播放的内容不一致 |
+| 在线流播时字幕停住 | Podcasts 窗口被最小化，面板不再渲染。用别的窗口盖住即可，不要最小化 |
+| 悬浮窗拖到屏幕外、抓不到 | 菜单栏 →「重置字幕位置」 |
+| 认识的词被标了 / 不认识的没标 | 在剧集词表里标为已掌握或收入生词本；档位只是默认值 |
+| 想看详细日志 | `PODLYRICS_DEBUG=1 .build/release/PodLyrics`，锁定、拒绝和时间轴分段会打到 stderr |
+| 不播放也想看某一行 | `PODLYRICS_PREVIEW="<transcriptID>\|<秒数>" .build/release/PodLyrics` |
+
+## 开发说明
+
+`make-app.sh` 会做一次 ad-hoc 签名；辅助功能权限绑在签名上，每次重编都会被当成新 App，系统会再问一次。要权限在重建后仍然有效，在登录钥匙串里放一张名为 `PodLyrics Dev` 的代码签名证书（自签即可），或设置 `PODLYRICS_SIGN_IDENTITY`。
+
+其它环境变量：
+
+| 变量 | 用途 |
+| --- | --- |
+| `PODLYRICS_DEBUG=1` | 对齐与时间轴的调试日志（stderr） |
+| `PODLYRICS_PREVIEW=<transcriptID>\|<seconds>` | 不播放，直接把某份已缓存字幕的某一行显示在悬浮窗 |
+| `PODLYRICS_API_KEY` | 语境释义用的 Key，跳过钥匙串（方便调试） |
+| `PODLYRICS_SIGN_IDENTITY` | `make-app.sh` 使用的签名身份，默认 `PodLyrics Dev` |
+
+词典 `Sources/PodLyrics/Resources/lexicon.sqlite` 由 `tools/build-lexicon.py` 从 ECDICT 1.0.28 生成。设计取舍见 `docs/adr/`。
+
+## 原理（简要）
+
+**字幕。** Apple Podcasts 把官方 transcript 缓存成带词级时间戳的 TTML：`~/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Library/Cache/Assets/TTML/`。MediaRemote 告诉我们当前在播哪一集、对应哪份字幕；已下载时还会给出缓存音频路径。
+
+**音频对齐。** 对 Podcasts 挂 Core Audio 进程 tap，把最近几秒输出留在内存里，每隔约 2 秒与磁盘上的剧集文件做互相关（Accelerate FFT）。相关峰给出「某个墙钟时刻对应文件里的位置」，悬浮窗以此为锚、按倍速推进。1× 匹配波形；其它倍速下 Podcasts 做了保音高时间拉伸，改用起音包络。词高亮按 100 ms 刷新。作者实测相邻两次锁定的抖动：1× 约 0–1 ms，2× 约 2 ms。
+
+**广告。** 下载文件常含动态广告，TTML 却按无广告的干净版本计时。Podcasts 在字幕旁附了干净音频的 ShazamKit 指纹。PodLyrics 读取这份指纹，每隔 5 秒探测文件，把偏移一致的探测点合并成分段，再用二分收紧边界。映射不到的空洞就是广告。建图在后台进行。
+
+**跳转。** 比较 MediaRemote 上报位置和本地推算；差距大就丢掉旧锁，从上报位置附近重新搜，连续失败则放宽到全集（约 1 秒）。跳转后一般要 3–5 秒才能重新锁上，因为采集缓冲必须全部换成跳转后的音频。
+
+**回退。** 没有本地文件时，用辅助功能读取官方字幕面板正在高亮的段落，映射回 TTML 再在段内外推——面板需打开（可以盖住，不能最小化）。两种信号都没有时，按 MediaRemote 的进度和倍速外推。
+
+**MediaRemote。** macOS 15.4 起只对 Apple 签名进程返回数据，因此查询跑在 `/usr/bin/swift` 子进程里，结果以 JSON 行流回。
+
+**词汇。** 词典保留有词频或考试标签的词条，并用 ECDICT 的 `exchange` 字段建变形表。档位取最低考试标签，无标签则按 COCA/BNC 词频兜底。剧集库元数据来自 Podcasts 的 `MTLibrary.sqlite` 只读快照；读失败时仍列出已缓存的 TTML，只是没有标题。
 
 ## 限制
 
-- 仅支持 Apple 提供 transcript 的剧集。
-- 音频对齐和广告映射要求剧集已下载；在线流播的剧集使用精度较低的面板同步。
-- 依赖 MediaRemote 私有框架、Podcasts 的缓存目录结构与辅助功能树，macOS 大版本升级后可能需要适配。
+- 只支持 Apple 提供 transcript 的剧集。
+- 音频对齐和广告映射要求剧集已下载；在线流播用精度较低的面板同步，且面板必须打开。
+- 内置词典是英→中，标注面向英语节目。
+- 依赖 MediaRemote 私有框架、Podcasts 的缓存布局和辅助功能树，macOS 大版本升级后可能需要适配。
 
 ## 许可证
+
+MIT
+
+---
+
+# English
+
+Floating, always-on-top transcript overlay for Apple Podcasts on macOS — desktop lyrics, but for podcasts. Downloaded episodes lock to the audio you actually hear. Words above your level are glossed inline in Chinese, with an episode wordlist and a wordbook for preview before listening and review afterwards.
+
+No account. Offline by default: transcripts, alignment and the dictionary all come from data Apple Podcasts already caches. The only optional network use is context glosses against an endpoint you configure.
+
+## Features
+
+- Translucent, draggable, always-on-top overlay over any app and fullscreen Spaces; menu-bar only, no Dock icon
+- Previous / current / next line, with word-by-word highlighting
+- Downloaded episodes: aligned to Podcasts’ own audio output, including dynamically inserted ads (shows “广告中” during a break, then stays in sync)
+- Follows pause, seeking, skip, chapter jumps and Podcasts’ 0.8×–2× speed
+- Streaming (not downloaded) falls back to the official transcript panel — less precise
+- Optional one-line sync monitor (source + offset)
+- **Vocabulary** (on by default, level **四级** / CET-4): harder words render as `word(释义)`; per-episode wordlist and full text; a wordbook with real sentences from your library; optional OpenAI-compatible context glosses
+
+## Requirements
+
+- macOS 14.2 or later (Core Audio process taps; developed on recent macOS, including macOS 26)
+- [Xcode Command Line Tools](https://developer.apple.com/download/all/?q=command%20line%20tools) (`xcode-select --install`) — needed to build, and at runtime for the Apple-signed `/usr/bin/swift` MediaRemote helper
+- An episode with an Apple-provided transcript (common on English-language shows)
+
+## Install
+
+```bash
+git clone https://github.com/byyuchun/PodLyrics.git
+cd PodLyrics
+./make-app.sh --install   # build PodLyrics.app and move it to /Applications
+```
+
+Build a local `.app` without installing: `./make-app.sh`.
+
+Launch **PodLyrics** from Launchpad or Spotlight. It lives in the menu bar (captions-bubble icon) and has no Dock icon. Open at login: System Settings → General → Login Items → **+** → PodLyrics.
+
+Or run the binary directly:
+
+```bash
+swift build -c release && .build/release/PodLyrics &
+```
+
+## First run
+
+1. Open PodLyrics. A translucent panel appears at the bottom centre of the screen (it says「等待播放…」until something is playing). A bubble icon appears in the menu bar.
+2. Grant the prompts that appear on launch:
+   - **Screen & System Audio Recording** — Podcasts’ output only; never the microphone or other apps. System Settings → Privacy & Security → Screen & System Audio Recording.
+   - **Accessibility** — requested at launch; used when a streaming (not downloaded) episode needs the official transcript panel. System Settings → Privacy & Security → Accessibility → **+** → `/Applications/PodLyrics.app`. For the bare binary, press <kbd>⌘</kbd><kbd>⇧</kbd><kbd>G</kbd> and enter the full path to `.build/release/PodLyrics` (`.build` is hidden).
+3. In Apple Podcasts:
+   1. **Download** the episode (the download arrow). Downloaded episodes use audio sync; streaming uses the panel fallback.
+   2. **Play** it and tap the **transcript (speech bubble)** button once so Podcasts caches the TTML. You can close the panel afterwards (keep it open if you rely on the streaming fallback; see Limitations).
+4. The overlay starts following once playback is detected. Right-click the overlay → **我的水平** and pick your level (default **四级**). Words at or below that level are treated as known.
+
+The first time the app reads Podcasts’ cache folder, macOS may also ask for folder access.
+
+## Daily use
+
+| Action | How |
+| --- | --- |
+| Move the overlay | Drag it |
+| Hide / show | Menu-bar icon →「显示/隐藏字幕」, or right-click the overlay →「隐藏（菜单栏图标可再显示）」 |
+| Lost off-screen | Menu-bar icon →「重置字幕位置」(bottom centre again) |
+| Bring it back | Open PodLyrics again from Launchpad / Spotlight (if already running, this re-shows and clamps the overlay) |
+| Change my level | Right-click the overlay →「我的水平」, or main window → Settings / episode toolbar |
+| Open the main window | Menu-bar icon →「打开 PodLyrics…」, or right-click the overlay |
+| Sync monitor | Right-click the overlay →「显示同步监控」 |
+| Quit | Menu-bar icon →「退出」, or right-click →「退出 PodLyrics」 |
+| Stop from a terminal | `pkill -x PodLyrics` |
+
+The menu-bar menu shows <kbd>⌘O</kbd> (main window), <kbd>⌘T</kbd> (toggle overlay), <kbd>⌘R</kbd> (reset position), <kbd>⌘Q</kbd> (quit). These are menu key equivalents, not global hotkeys.
+
+### Main window
+
+Menu-bar icon →「打开 PodLyrics…」:
+
+- **剧集库** — every episode whose transcript is cached on this Mac (open the transcript panel once in Podcasts to cache one). Search by show or title. Select an episode for its **词表** (annotated words grouped by level, with meaning, count and an example) or the annotated **全文**. Same page for pre-listen preview and post-listen review; bookmark into the Wordbook or mark Known.
+- **生词本** — your saved words and every sentence they appear in across cached episodes. The toolbar switches to **已掌握**.
+- **设置** — your level and the optional gloss provider.
+
+An empty library shows「没有已缓存字幕的剧集」— open a transcript panel in Podcasts first.
+
+### Vocabulary
+
+Ships a trimmed [ECDICT](https://github.com/skywind3000/ECDICT) 1.0.28 (~43k headwords, ~7 MB, offline). Each transcript token is mapped to a headword (`negotiated → negotiate`) and an exam level: 初中 / 高中 / 四级 / 六级 / 考研 / 托福雅思 / GRE.
+
+**我的水平** offers 初中 through 托福雅思 (not GRE — “I know every GRE word” would leave nothing to mark). GRE-level words are always treated as above your level. Default is 四级. Two personal lists override the level:
+
+- **Wordbook (生词本)** — always annotated
+- **Known (已掌握)** — never annotated
+- Tokens not in the lexicon (names, brands, …) are never annotated
+
+**Context glosses (optional, off).** ECDICT is a general dictionary; a podcast often uses one sense (*pitch*, *chunk*). In Settings, enable「启用语境释义」, set any OpenAI-compatible Base URL (through `/v1`), model and API key, then「保存」.「测试连接」checks the endpoint. Annotated words of the current episode — plus the sentence each first appears in — are sent in batches of 40, preferring words from the current playback position onward. Episode detail also has「生成语境释义」. Results are cached per episode and model in `~/Library/Application Support/PodLyrics/user.sqlite`. The API key lives in the Keychain.
+
+With the provider off, the app is fully offline. With it on, only transcript sentences you play (or generate glosses for) go to the endpoint you configured — not audio, not your library.
+
+### Sync monitor
+
+Right-click the overlay to enable it. A monospaced line appears under the subtitles, for example:
+
+```
+音频锁定 · 文件 6:31.93 · 字幕 5:43.04 (-48.9s) · 3 段
+```
+
+| Field | Meaning |
+| --- | --- |
+| **音频锁定** / **字幕面板** / **搜索中 ±6s** / **MediaRemote 外推** | Sync source, roughly most to least precise.「搜索中 ±…s」means the search window is widening |
+| **文件** | Position inside the audio file Podcasts is playing |
+| **字幕** | Matching position on the transcript timeline; the offset in parentheses is cumulative inserted-ad time |
+| **N 段** | Constant-offset segments (about ad-breaks + 1) |
+| **广告中** | An ad is playing; the “next line” slot previews where the programme resumes |
+| **正在校准时间轴…** | First seconds of a new episode, building the ad map |
+
+If the subtitles look wrong, this line tells you whether the audio lock is held and which offset is applied.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+| --- | --- |
+| 「等待播放…」or「没有正在播放的内容」 | Play an episode in Apple Podcasts |
+| 「字幕尚未缓存：请在 Podcasts 里打开一次字幕面板」 | Open the transcript panel once so Podcasts downloads the TTML |
+| 「本集没有字幕（Apple 未提供 transcript）」 | Apple has not published a transcript |
+| Monitor stays on 字幕面板 or MediaRemote 外推 for a downloaded episode | System Audio Recording denied, or the tap failed. Check Privacy & Security → Screen & System Audio Recording |
+| Monitor shows 搜索中 for more than ~10 s | Podcasts is not outputting audio (paused, muted, or a device the tap cannot follow), or the file on disk is not what is playing |
+| Streaming subtitles freeze | The Podcasts window is minimized; the panel stops rendering. Cover it instead |
+| Overlay dragged off-screen | Menu bar →「重置字幕位置」 |
+| A word you know is marked / one you don’t isn’t | Mark it Known or bookmark it in the episode wordlist; the level is only a default |
+| Verbose logs | `PODLYRICS_DEBUG=1 .build/release/PodLyrics` — locks, rejections and timeline segments go to stderr |
+| Check a line without playing | `PODLYRICS_PREVIEW="<transcriptID>\|<seconds>" .build/release/PodLyrics` |
+
+## Development
+
+`make-app.sh` ad-hoc signs the bundle. Accessibility TCC is tied to that signature, so every rebuild looks like a new app. For a stable permission, put a codesigning certificate named `PodLyrics Dev` in the login keychain (self-signed is fine), or set `PODLYRICS_SIGN_IDENTITY`.
+
+| Variable | Purpose |
+| --- | --- |
+| `PODLYRICS_DEBUG=1` | Alignment / timeline debug logs on stderr |
+| `PODLYRICS_PREVIEW=<transcriptID>\|<seconds>` | Show one line of a cached transcript without playback |
+| `PODLYRICS_API_KEY` | Gloss API key, skipping the Keychain |
+| `PODLYRICS_SIGN_IDENTITY` | Identity used by `make-app.sh` (default `PodLyrics Dev`) |
+
+`Sources/PodLyrics/Resources/lexicon.sqlite` is produced by `tools/build-lexicon.py` from ECDICT 1.0.28. Design notes: `docs/adr/`.
+
+## How it works (short)
+
+**Transcripts.** Apple Podcasts caches official transcripts as word-timed TTML under `~/Library/Group Containers/243LU875E5.groups.com.apple.podcasts/Library/Cache/Assets/TTML/`. MediaRemote identifies the playing episode and its transcript; for downloads it also yields the cached audio path.
+
+**Audio alignment.** A Core Audio process tap on Podcasts keeps the last few seconds of output. About every two seconds that buffer is cross-correlated with the episode file (FFT via Accelerate). The peak is a file position at a known wall-clock instant; the overlay advances from that anchor at the playback rate. At 1× the raw waveform matches; at other speeds Podcasts time-stretches, so an onset-envelope correlation is used instead. Word highlighting refreshes every 100 ms. Measured lock-to-lock jitter: about 0–1 ms at 1×, about 2 ms at 2×.
+
+**Ads.** Downloaded files usually contain inserted ads, while TTML is timed against the clean programme. Podcasts ships a ShazamKit signature of the clean audio next to each transcript. PodLyrics probes the file every 5 s against that signature, merges agreeing offsets into segments and refines edges by bisection. Gaps are ads. The map is built in the background.
+
+**Seeks.** A jump is MediaRemote’s position disagreeing with ours; the stale lock is dropped and search widens from the reported position up to the whole file (~1 s). Re-lock typically takes 3–5 s after the last jump, because the capture buffer must be entirely post-seek audio.
+
+**Fallbacks.** With no local file, Accessibility reads the paragraph the official panel is highlighting, maps it back to TTML and extrapolates inside that paragraph — the panel must stay open (covered is fine, minimized is not). With neither signal, MediaRemote’s position and rate are extrapolated.
+
+**MediaRemote.** Since macOS 15.4 the private API only answers Apple-signed processes, so the query runs inside `/usr/bin/swift` and streams JSON lines back.
+
+**Vocabulary.** The lexicon keeps headwords that have a frequency rank or an exam tag, plus an inflection table from ECDICT’s `exchange` field. Level is the lowest exam tag, else a COCA/BNC-rank fallback. Episode metadata is a read-only snapshot of Podcasts’ `MTLibrary.sqlite`; if that fails, the library still lists cached TTML files, just without titles.
+
+## Limitations
+
+- Only episodes for which Apple publishes a transcript.
+- Audio alignment and ad mapping need a download; streaming uses the less precise panel sync, and the panel must stay open.
+- The bundled dictionary is English→Chinese; annotations target English shows.
+- Relies on the private MediaRemote framework, Podcasts’ cache layout and its accessibility tree. Major macOS updates may break this.
+
+## License
 
 MIT
